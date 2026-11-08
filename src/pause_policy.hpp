@@ -16,6 +16,8 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     case 1:  // Novalis: ripple water and four static-strip water controllers
         return oclass == 751 || oclass == 676 || oclass == 678
                || oclass == 761 || oclass == 1225;
+    case 2:  // Aridia: ocean/mud draws are enqueued by this class each frame
+        return oclass == 854;
     case 5:  // Rilgar
         return oclass == 831;
     case 7:  // Umbris

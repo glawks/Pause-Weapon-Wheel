@@ -11,6 +11,9 @@ int main() {
     assert(needs_update_for_water(1, 678));
     assert(needs_update_for_water(1, 761));
     assert(needs_update_for_water(1, 1225));
+    // Aridia's ocean/mud class must register its draw callback while paused.
+    assert(needs_update_for_water(2, 854));
+    assert(!needs_update_for_water(1, 854));
     assert(needs_update_for_water(5, 831));
     assert(needs_update_for_water(7, 902));
     assert(needs_update_for_water(7, 948));
