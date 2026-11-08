@@ -1,7 +1,10 @@
 #include "openrac/mod.hpp"
 #include "openrac/games/rac1.hpp"
+#include "pause_legacy_shade.hpp"
 #include "pause_policy.hpp"
+#include "pause_veil.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <set>
 #include <string>
@@ -28,12 +31,20 @@ struct FrozenAnimation {
 
 openrac::Mod* game_mod = nullptr;
 bool wheel_active = false;
+std::atomic<bool> wheel_visible_for_overlay{false};
 bool wheel_seen_this_tick = false;
 bool world_gate = false;
 bool freeze_animations = true;
 bool keep_water = true;
 bool hold_hoven_scroll = true;
 bool diagnostic_log = true;
+bool soften_background = true;
+int background_softening_strength = 30;
+using GameDrawRectFn = void (*)(std::int32_t, std::int32_t, std::int32_t,
+                                std::int32_t, std::uint64_t);
+GameDrawRectFn legacy_draw_rect = nullptr;
+bool legacy_draw_rect_warning_logged = false;
+bool legacy_first_draw_logged = false;
 openrac::gaddr moby_array_global = 0;
 openrac::gaddr frame_time_global = 0;
 std::vector<FrozenAnimation> flagged_mobys;
@@ -67,6 +78,24 @@ void report_pause_diagnostics() {
     observed_classes.clear();
     exempted_classes.clear();
 }
+
+// OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
+// standalone mod buildable with that SDK; 1.14+ adds the optional renderer.
+#if OPENRAC_MOD_API_MINOR >= 14
+// The standard mod overlay is drawn after the game's HUD. Leave an elliptical
+// opening around Quick Select so its icons stay bright; shade only the rest.
+// The renderer API exposes rectangles, not a sampled-texture blur operation.
+void draw_background_softening(void*, const openrac_overlay* overlay) {
+    if (!wheel_visible_for_overlay.load(std::memory_order_relaxed)
+        || overlay == nullptr || overlay->rect == nullptr) {
+        return;
+    }
+    pause_veil::for_each_rect(background_softening_strength,
+                             [&](float x, float y, float w, float h, std::uint32_t rgba) {
+                                 overlay->rect(overlay->context, x, y, w, h, rgba);
+                             });
+}
+#endif
 
 // The game's active moby array can move between levels and after a respawn.
 // Read the global through the SDK's relocation facility instead of caching
@@ -170,6 +199,10 @@ void load(openrac::Mod& mod) {
 
     game_mod = &mod;
     wheel_active = false;
+    wheel_visible_for_overlay.store(false, std::memory_order_relaxed);
+    legacy_draw_rect = nullptr;
+    legacy_draw_rect_warning_logged = false;
+    legacy_first_draw_logged = false;
     wheel_seen_this_tick = false;
     world_gate = false;
     flagged_mobys.clear();
@@ -180,11 +213,14 @@ void load(openrac::Mod& mod) {
     keep_water = mod.setting<bool>("keep_water");
     hold_hoven_scroll = mod.setting<bool>("hold_hoven_scroll");
     diagnostic_log = mod.setting<bool>("diagnostic_log");
+    soften_background = mod.setting<bool>("soften_background");
+    background_softening_strength = mod.setting<int>("background_softening_strength");
     moby_array_global = mod.version() == "pal" ? kPalMobyArrayGlobal : kNtscMobyArrayGlobal;
     frame_time_global = mod.version() == "pal" ? kPalFrameTimeGlobal : kNtscFrameTimeGlobal;
 
     mod.hook<openrac::rac1::Hud_QuickSelect_Update>([](auto original, std::uint32_t selector) {
         wheel_active = true;
+        wheel_visible_for_overlay.store(true, std::memory_order_relaxed);
         wheel_seen_this_tick = true;
         original(selector); // Keep the real weapon wheel responsive.
     });
@@ -230,9 +266,62 @@ void load(openrac::Mod& mod) {
         world_gate = false;
     }
 
+    if (soften_background) {
+        bool modern_overlay_registered = false;
+#if OPENRAC_MOD_API_MINOR >= 14
+        modern_overlay_registered = mod.on_overlay(draw_background_softening);
+        if (modern_overlay_registered) {
+            mod.info("background softening overlay registered (OpenRAC API 1.14)");
+        } else {
+            mod.info("OpenRAC overlay API unavailable; trying RAC1's own screen-rectangle renderer");
+        }
+#endif
+        if (!modern_overlay_registered) {
+            // API 1.12 has no port overlay, but RAC1 itself has a coloured
+            // screen-rectangle draw routine. Insert its packet just before
+            // the quick-select HUD draws, so wheel icons remain on top.
+            // Optional and isolated: if the hook is taken, pause still works.
+            try {
+                mod.hook<openrac::rac1::Hud_QuickSelect_Draw>(
+                    [](auto original, std::uint32_t panel) -> std::int32_t {
+                        if (wheel_active && soften_background) {
+                            if (legacy_draw_rect == nullptr) {
+                                legacy_draw_rect = game_mod->function_at<GameDrawRectFn>(
+                                    pause_legacy_shade::game_rect_address(
+                                        game_mod->version() == "pal"));
+                                if (legacy_draw_rect == nullptr
+                                    && !legacy_draw_rect_warning_logged) {
+                                    game_mod->warn("RAC1 screen-rectangle function unavailable; background softening skipped");
+                                    legacy_draw_rect_warning_logged = true;
+                                }
+                            }
+                            if (pause_legacy_shade::should_draw(
+                                    wheel_active, soften_background,
+                                    legacy_draw_rect != nullptr)) {
+                                legacy_draw_rect(
+                                    0, pause_legacy_shade::kPictureHeight,
+                                    0, pause_legacy_shade::kPictureWidth,
+                                    pause_legacy_shade::colour_for_strength(
+                                        background_softening_strength));
+                                if (!legacy_first_draw_logged) {
+                                    game_mod->info("experimental RAC1 background tint: first draw call made");
+                                    legacy_first_draw_logged = true;
+                                }
+                            }
+                        }
+                        return original(panel);
+                    });
+                mod.info("experimental RAC1 HUD-background tint hook registered (API 1.12 compatible)");
+            } catch (const openrac::Error&) {
+                mod.warn("RAC1 HUD tint hook unavailable; world pause remains active");
+            }
+        }
+    }
+
     mod.on_frame([] {
         if (!wheel_seen_this_tick) {
             wheel_active = false;
+            wheel_visible_for_overlay.store(false, std::memory_order_relaxed);
             restore_animations();
             report_pause_diagnostics();
         }
@@ -246,4 +335,4 @@ void load(openrac::Mod& mod) {
 
 } // namespace
 
-OPENRAC_MOD_CPP("weapon-wheel-pause-test", "0.2.0-test.4", load)
+OPENRAC_MOD_CPP("weapon-wheel-pause-test", "0.2.0-test.9", load)

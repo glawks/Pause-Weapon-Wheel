@@ -13,8 +13,9 @@ constexpr std::uint16_t kSkipAnimation = 0x0040;
 // not a promise that *all* visual effects are covered.
 constexpr bool needs_update_for_water(int level, int oclass) {
     switch (level) {
-    case 1:  // Novalis
-        return oclass == 751;
+    case 1:  // Novalis: ripple water and four static-strip water controllers
+        return oclass == 751 || oclass == 676 || oclass == 678
+               || oclass == 761 || oclass == 1225;
     case 5:  // Rilgar
         return oclass == 831;
     case 7:  // Umbris
@@ -27,8 +28,9 @@ constexpr bool needs_update_for_water(int level, int oclass) {
         return oclass == 19 || oclass == 293 || oclass == 384 || oclass == 1901;
     case 13: // Gemlik Base
         return oclass == 1263 || oclass == 1393;
-    case 14: // Oltanis: textured level effects (distinct from moby particles)
-        return oclass == 1418;
+    case 14: // Oltanis: textured scenery, smoke/fire, rain, and lower liquid grid
+        return oclass == 1418 || oclass == 760 || oclass == 1400
+               || oclass == 1260;
     default:
         return false;
     }

@@ -6,6 +6,11 @@
 int main() {
     using namespace pause_policy;
     assert(needs_update_for_water(1, 751));
+    // Novalis's static-strip water needs a per-frame draw callback too.
+    assert(needs_update_for_water(1, 676));
+    assert(needs_update_for_water(1, 678));
+    assert(needs_update_for_water(1, 761));
+    assert(needs_update_for_water(1, 1225));
     assert(needs_update_for_water(5, 831));
     assert(needs_update_for_water(7, 902));
     assert(needs_update_for_water(7, 948));
@@ -22,8 +27,21 @@ int main() {
     assert(needs_update_for_water(13, 1393));
     // Oltanis scenery draws are enqueued by a separate effect controller.
     assert(needs_update_for_water(14, 1418));
+    // Oltanis burning buildings use class 760 to enqueue smoke/fire drawing.
+    assert(needs_update_for_water(14, 760));
+    // Oltanis rain and rain splashes are spawned by weather class 1400.
+    assert(needs_update_for_water(14, 1400));
+    // Oltanis's low-lying liquid/fog-like plane is queued by class 1260.
+    assert(needs_update_for_water(14, 1260));
+    assert(!needs_update_for_water(13, 1260));
+    // Class 809 only advances their scroll phase; leave it frozen.
+    assert(!needs_update_for_water(14, 809));
     assert(!needs_update_for_water(7, 940));
     assert(!needs_update_for_water(1, 831));
+    assert(!needs_update_for_water(2, 676));
+    assert(!needs_update_for_water(2, 678));
+    assert(!needs_update_for_water(2, 761));
+    assert(!needs_update_for_water(2, 1225));
     assert(!needs_update_for_water(2, 751));
     assert(!needs_update_for_water(12, 999));
     assert(!needs_update_for_water(14, 1901));

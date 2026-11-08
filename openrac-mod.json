@@ -2,7 +2,7 @@
   "format": 2,
   "id": "weapon-wheel-pause-test",
   "name": "Weapon Wheel Pause (Experimental Test)",
-  "version": "0.2.0-test.4",
+  "version": "0.2.0-test.10",
   "author": "glawks",
   "description": "Experimental RAC1 weapon wheel pause with animation freeze, scenery exemptions, and diagnostics.",
   "license": "MIT",
@@ -22,7 +22,7 @@
       "name": "Keep water and scenery drawing",
       "type": "bool",
       "default": true,
-      "description": "Let known visual-effect controllers run each frame to draw Hoven water, Oltanis effects and other water surfaces."
+      "description": "Let known visual-effect controllers run each frame to draw Novalis water, Hoven water, Oltanis effects and other water surfaces."
     },
     {
       "key": "hold_hoven_scroll",
@@ -37,6 +37,22 @@
       "type": "bool",
       "default": true,
       "description": "When the weapon wheel closes, log the observed moby classes and which ones were exempted, for investigating missing scenery."
+    },
+    {
+      "key": "soften_background",
+      "name": "Soften background during weapon selection",
+      "type": "bool",
+      "default": true,
+      "description": "Shade the scene beneath the weapon wheel. API 1.12 uses RAC1's own tint renderer; API 1.14+ builds can use a feathered overlay. This is not a Gaussian blur."
+    },
+    {
+      "key": "background_softening_strength",
+      "name": "Background softening strength",
+      "type": "int",
+      "default": 30,
+      "min": 10,
+      "max": 60,
+      "description": "Strength of the translucent shade in percent. Changes take effect after restarting the game."
     }
   ]
 }
