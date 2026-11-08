@@ -9,7 +9,7 @@ constexpr std::uint16_t kSkipAnimation = 0x0040;
 
 // Known scenery-rendering moby classes from the RAC1 decompilation. Their
 // updates register per-frame draw callbacks; skipping those updates makes
-// water or textured level effects disappear. This is an experimental allowlist,
+// water or textured level effects disappear. This is a conservative allowlist,
 // not a promise that *all* visual effects are covered.
 constexpr bool needs_update_for_water(int level, int oclass) {
     // The ship's transparent canopy is drawn by callbacks from classes
