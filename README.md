@@ -1,67 +1,95 @@
-# Experimental Weapon Wheel Pause for OpenRAC RAC1
+# Weapon Wheel Pause for OpenRAC (Ratchet & Clank 1)
 
-An **experimental weapon-wheel pause mod** for OpenRAC's Ratchet & Clank 1 (RAC1). It is still undergoing in-game testing.
+**Version 1.0.0 — working release**
 
-The mod stops Ratchet and skips world moby updates while Quick Select is open. It also provides configurable options:
+A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
-1. **Freeze enemy animations (default ON):** Set the game's `0x40` animation-skip flag on mobys whose updates are blocked. Clear only the bit this mod set when the wheel closes, and only if the same object is still in the same level/slot.
-2. **Keep water and scenery drawing (default ON):** Let known visual-effect controllers execute the updates that register their render callbacks every frame. Novalis includes ripple-water class 751 and static-strip-water classes 676, 678, 761, and 1225 (added in `test.10`, confirmed in-game). Aridia now allows class 854 to register its ocean/mud draw callback (added in `test.11`, not yet verified in-game). Hoven includes scrolling-texture class 1901; Oltanis includes scenery class 1418, smoke/fire class 760, rain emitter class 1400, and lower liquid-grid class 1260. The water on Hoven and the low-lying surface on Oltanis were confirmed visible again; Oltanis rain and fire remain **animated**.
-3. **Freeze Hoven water scrolling (default ON):** Temporarily set `frame_delta_time` to zero *only while class 1901's update is executing*, then restore its exact previous value. That update advances the UV phase using frame time and then queues its draw callback; testing confirmed Hoven's water remains visible and stops scrolling. Source: [OpenRAC Hoven scrolling layers](https://github.com/OpenRAC/OpenRAC/blob/develop/games/rac1/ntsc/src/overlays/l12/mobys/scrolling_texture_layers.c).
-4. **Log pause diagnostics (default ON):** Record the game's reported level, all moby class IDs observed during the pause and which were allowed to update. The log is written when the wheel closes to help diagnose scenery that still disappears.
-5. **Soften background during weapon selection (default ON, experimental):** Reduce the background's prominence while leaving the weapon-wheel icons readable. On **API 1.14+** (when compiled with SDK 1.14+), try a translucent blue-black overlay with a feathered opening around the wheel. On **API 1.12**, `test.9` and later use RAC1's own screen-rectangle renderer immediately *before* drawing Quick Select, tinting the world underneath it. The API 1.12 fallback was confirmed working in-game. **Neither method is a true Gaussian blur.** The 10–60% Background softening strength setting (default 30%) controls the tint. Disable this setting if the experiment produces rendering problems.
+The visual fixes have been tested in-game on **NTSC-U** across the affected planets, including Quartu's electrified water. The manifest also supports PAL, but PAL and non-Windows gameplay have not been independently verified.
 
-**Compatibility:** The manifest requests mod interface **1.12**, so both builds below target OpenRAC 1.12 and newer. The SDK version used *to compile* the mod determines which drawing methods it can use:
+## Features
 
-| Compile with | Run on OpenRAC API 1.12 | Run on OpenRAC API 1.14+ |
-|---|---|---|
-| SDK 1.12 | Pause works; experimental game-native tint | Pause works; experimental game-native tint |
-| SDK 1.14+ | Pause works; experimental game-native tint | Pause works; 1.14 overlay tint |
+- **Pause gameplay during Quick Select.** Ratchet and normal moby (world-object) updates stop until the wheel closes.
+- **Freeze enemy animations.** Optionally set the game's animation-skip flag on paused objects, then restore only flags this mod changed.
+- **Keep scenery visible.** Allow the specific controllers needed to register water, mud, lava, glass and environmental draw callbacks each frame.
+- **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
+- **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
+- **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
+- **Optional diagnostics.** Log observed moby classes and scenery exemptions when Quick Select closes.
 
-Installing a new OpenRAC version does not add the 1.14 overlay to a DLL already compiled with SDK 1.12; rebuild the mod with SDK 1.14+ to include that path. The game-native fallback is available to both builds.
+### Verified scenery fixes
 
-The Hoven class 1901 visibility and scroll freeze were **confirmed in-game**. On Oltanis, `test.5` restored fire, `test.6` restored rain, and `test.7` restored the stationary fog-like lower surface. The `test.9` game-native background tint and Novalis's static-strip water exemptions in `test.10` were also **confirmed in-game**. Aridia's ocean/mud exemption in `test.11` still needs in-game verification.
+| Planet / area | Visual effects preserved during Quick Select |
+| --- | --- |
+| Novalis | Water and static water strips |
+| Aridia | Mud/ocean surface |
+| Nebula G34 | Transparent glass and textured quads |
+| Blackwater City (Rilgar) | Rising water and ocean surface |
+| Umbris | Water grids and ocean surface |
+| Batalia | Main water and flowing textured water |
+| Gaspar | Lava |
+| Pokitaru | Ocean, water tiles and flowing surfaces |
+| Hoven | Water and scrolling surfaces |
+| Gemlik Base | Level-specific environmental effects |
+| Oltanis | Scenery, fire/smoke, rain and lower liquid-like surface |
+| Quartu | Regular water, electrified water and electrical arcs |
+| Kalebo III | Glass, distant atmosphere and luminous conveyors |
+| Multiple planets | Ship canopy/visor transparency |
 
-## Testing
+## Settings
 
-Use a backed-up save and test somewhere safe, away from a mission or timed hazard.
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| Freeze enemy animations | On | Hold paused moby animations in place |
+| Keep water and scenery drawing | On | Preserve scenery and selected visual-effect callbacks |
+| Freeze Hoven water scrolling | On | Keep Hoven's visible water texture from scrolling |
+| Log pause diagnostics | On | Record moby class IDs and exempted classes when the wheel closes |
+| Soften background during weapon selection | On | Shade the world behind Quick Select |
+| Background softening strength | 30% | Adjust the shade from 10% to 60% |
 
-Install the built Windows x64 package through OpenRAC's Mods tab. In the mod's settings, try:
+Restart the game after changing settings.
 
-| Test | Freeze enemy animations | Keep water and scenery drawing | What it isolates |
-|---|---|---|---|
-| A | Off | Off | Basic pause behaviour (baseline) |
-| B | On | Off | Animation change only |
-| C | Off | On | Water-rendering change only |
-| D | On | On | Both changes |
+## Install and build
 
-Restart the game when changing mod settings. On each test, open the weapon wheel while an enemy is mid-animation and near water. Check whether the animation stops on the current frame, water remains visible, enemies still cannot move or harm Ratchet, and both animation and AI resume after closing the wheel.
+This repository contains **source code**, not a precompiled mod.
 
-Please report the planet, disc region, OpenRAC version, and any missing objects, moving platforms, projectiles or crashes. The water allowlist is **not comprehensive for every rendering dependency**; allowing those updates can also allow their associated water/platform motion to progress during the pause.
+To build the Windows x64 package:
 
-For **test.11**, open Quick Select on **Aridia** where the mud previously disappeared. Check whether the surface stays visible while enemy AI remains frozen. With `Keep water and scenery drawing` enabled, the pause diagnostics should report class `854` as exempted when its moby updates. Retest the previously fixed water on Novalis. The other visual test is to verify the background darkens while the wheel icons remain readable and returns to normal after closing. The native fallback logs `experimental RAC1 HUD-background tint hook registered` on load and `experimental RAC1 background tint: first draw call made` once its rectangle routine is invoked. These logs show invocation, not proof of a correct display. With SDK/runtime 1.14+, the alternate path logs `background softening overlay registered`. Disable the option if visual or gameplay issues occur.
+1. Push the project files to a GitHub repository.
+2. Open **Actions → windows-x64 → Run workflow**, or push to `main`/`master`.
+3. Download the **weapon-wheel-pause-windows-x86_64** artifact after the workflow succeeds.
+4. Install the OpenRAC-compatible mod ZIP inside that artifact through OpenRAC's **Mods** tab.
 
-## Windows x64 build
-
-This repository includes `.github/workflows/windows.yml`. Push the folder's contents to a GitHub repository and select **Actions → windows-x64-test → Run workflow** (or push to `main`/`master`). Once it passes, download the `weapon-wheel-pause-test-windows-x86_64` artifact. Inside it is the OpenRAC-compatible mod ZIP.
-
-The workflow currently uses a Windows-capable OpenRAC branch with **SDK 1.12**, producing the experimental game-native tint fallback. Once a Windows-compatible SDK 1.14+ is available, building with it will also include the optional port overlay, while retaining runtime compatibility with API 1.12. Alternatively, with CMake, Ninja, MSVC and an OpenRAC SDK 1.12 or newer installed:
+For a local Windows build with MSVC, CMake, Ninja and the [OpenRAC mod SDK 1.14.2](https://github.com/OpenRAC/OpenRAC/tree/sdk-v1.14.2/sdk) (or a newer SDK providing API 1.14+):
 
 ```powershell
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DOpenRACMod_DIR="C:/path/to/OpenRAC/sdk/cmake"
 cmake --build build-win --parallel
 ```
 
-This source archive is **not a precompiled Windows mod**. The binary still needs to be built before OpenRAC can load it.
+The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag (SDK API **1.14**). The manifest still targets minimum runtime API **1.12**, so the mod remains loadable on older compatible OpenRAC versions. At runtime, API 1.14+ uses the optional feathered overlay for background shading; API 1.12–1.13 falls back to RAC1's existing rectangle renderer. Both are tints rather than sampled blurs.
 
-## Developer notes
+**Existing installations:** The internal mod ID remains `weapon-wheel-pause-test` for compatibility with the builds and settings used during development. The visible mod name and version are now **Weapon Wheel Pause 1.0.0**.
 
-- Source: `src/mod.cpp`; isolated allowlist/flag rules: `src/pause_policy.hpp`; overlay geometry: `src/pause_veil.hpp`; game-native tint constants: `src/pause_legacy_shade.hpp`.
-- Checks: `tests/policy_test.cpp`, `tests/veil_test.cpp`, and `tests/legacy_shade_test.cpp`.
-- The first animation tick may advance once because the OpenRAC moby gate fires *after* the game's animation advancement.
-- The mod accesses game memory using documented addresses from OpenRAC's RAC1 PAL and NTSC world hosts. Additional regions or future layout changes need checking.
-- OpenRAC's moby-update gate is exclusive. If the gate is unavailable, only Ratchet freezes.
-- The API 1.12 fallback calls RAC1's existing `draw_rect_overlay` game function (NTSC) or `DrawRectOverlay_FiiiiUl` (PAL) via the mod function lookup, using documented game code addresses. Source: [NTSC screen rectangle](https://github.com/OpenRAC/OpenRAC/blob/master/games/rac1/ntsc/src/rendering/effects/draw_rect_overlay.c) and [PAL renderer](https://github.com/OpenRAC/OpenRAC/blob/master/games/rac1/src/game/render/draw.c). Drawing into the live HUD render pass remains an in-game experiment.
+## Known limitations
 
-## Attribution
+- Some exempted scenery controllers also advance visual motion. For example, Kalebo III's conveyor texture keeps moving while Ratchet is frozen; animated rain, fire and flowing surfaces can continue animating.
+- The first animation tick can advance once because the moby-update gate runs after the game's animation step.
+- The mod needs OpenRAC's exclusive moby-update gate. If another mod owns that gate, this mod can freeze Ratchet but cannot fully pause the world.
+- Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
+- The background shading is not a true Gaussian blur. Disable it if it causes display issues.
 
-Game decompilation observations and source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC).
+## Technical notes
+
+`src/mod.cpp` contains the OpenRAC hooks and main pause loop. `src/pause_policy.hpp` holds the level-specific scenery rules; `src/pause_legacy_shade.hpp` and `src/pause_veil.hpp` contain the two background-shading paths.
+
+Most water/scenery surfaces register a **draw callback each frame** from a moby update. Skipping every moby update freezes gameplay but also removes those surfaces. This mod keeps the required rendering controllers active, with a separate draw-only exception for Quartu's damaging electrical-water controller (class `655`).
+
+Quartu's electric-bolt callback uses the game's **32-bit code address**, rather than a native function pointer: `0x002D8710` on NTSC-U and `0x002D9B00` on PAL. The normal electric-water update—which can damage Ratchet—remains blocked during Quick Select.
+
+Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
+
+Tests: `tests/policy_test.cpp`, `tests/veil_test.cpp`, and `tests/legacy_shade_test.cpp`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Authored by **glawks**.

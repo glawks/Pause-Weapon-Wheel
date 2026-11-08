@@ -20,6 +20,20 @@ constexpr openrac::gaddr kMobySize = 0x100u;
 constexpr openrac::gaddr kMobyFlags = 0x34u;
 constexpr openrac::gaddr kMobySpawnFrame = 0x38u;
 constexpr openrac::gaddr kMobyClass = 0xA6u;
+constexpr openrac::gaddr kMobyState = 0x20u;
+constexpr openrac::gaddr kMobyPvars = 0x78u;
+constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
+
+// Game-code addresses from the RAC1 PAL and NTSC-U decompilations. Both
+// callbacks are resolved for the current loaded level; nothing is patched in
+// OpenRAC itself. The electrical bolt draw function uses initialized geometry
+// but does not execute the controller's shock/timer update.
+constexpr openrac::gaddr kPalAddDrawCallback = 0x001F49B0u;
+constexpr openrac::gaddr kNtscAddDrawCallback = 0x001F4600u;
+// This native pointer type is ONLY for checking that the draw function exists.
+// The game's callback queue takes two 32-bit guest addresses, not host pointers.
+using GameDrawEffectFn = void (*)(void*);
+using GameAddDrawCallbackFn = void (*)(std::uint32_t, std::uint32_t);
 
 struct FrozenAnimation {
     int level;
@@ -34,6 +48,9 @@ bool wheel_active = false;
 std::atomic<bool> wheel_visible_for_overlay{false};
 bool wheel_seen_this_tick = false;
 bool world_gate = false;
+bool quartu_electric_draw_hook = false;
+bool quartu_electric_first_draw_logged = false;
+bool quartu_electric_missing_draw_warned = false;
 bool freeze_animations = true;
 bool keep_water = true;
 bool hold_hoven_scroll = true;
@@ -176,11 +193,16 @@ int gate_moby_update(void*, int slot, int phase) {
         }
         observed_classes.insert(oclass);
     }
-    if (keep_water && pause_policy::needs_update_for_water(level, oclass)) {
+    if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
+                       || pause_policy::should_route_quartu_electric_draw(
+                           wheel_active, keep_water, world_gate,
+                           quartu_electric_draw_hook, level, oclass))) {
         if (diagnostic_log) {
             exempted_classes.insert(oclass);
         }
-        return 0; // Let the water moby register the draw callback this frame.
+        // Class 655 is intercepted by the draw-only hook below; it never
+        // reaches its original damaging update during Quick Select.
+        return 0;
     }
 
     if (freeze_animations) {
@@ -191,7 +213,7 @@ int gate_moby_update(void*, int slot, int phase) {
 
 void load(openrac::Mod& mod) {
     if (mod.game() != "rac1") {
-        throw openrac::Error("Weapon Wheel Pause Test is for Ratchet & Clank 1");
+        throw openrac::Error("Weapon Wheel Pause is for Ratchet & Clank 1");
     }
     if (mod.version() != "pal" && mod.version() != "ntsc") {
         throw openrac::Error("Only RAC1 PAL and NTSC-U are supported");
@@ -205,6 +227,9 @@ void load(openrac::Mod& mod) {
     legacy_first_draw_logged = false;
     wheel_seen_this_tick = false;
     world_gate = false;
+    quartu_electric_draw_hook = false;
+    quartu_electric_first_draw_logged = false;
+    quartu_electric_missing_draw_warned = false;
     flagged_mobys.clear();
     observed_level = -1;
     observed_classes.clear();
@@ -259,6 +284,59 @@ void load(openrac::Mod& mod) {
         mod.warn("Hoven scroll-hold hook unavailable; water will still scroll");
     }
 
+    // Quartu class 655 draws lightning, but its ordinary update also changes
+    // shock timers, triggers audio, and damages Ratchet. Intercept the update
+    // during Quick Select and only enqueue the game's already-initialized
+    // bolt draw callback. Do not invoke original() while the world is paused.
+    try {
+        mod.hook<openrac::rac1::Moby_Class655_Update>(
+            [](auto original, std::uint32_t moby) {
+                const bool draw_only = pause_policy::should_route_quartu_electric_draw(
+                    wheel_active, keep_water, world_gate,
+                    quartu_electric_draw_hook, game_mod->loaded_level(), 655);
+                bool drawable = false;
+                if (draw_only && moby != 0) {
+                    auto memory = game_mod->memory();
+                    const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                    const auto light_slot = pvars == 0 ? -1
+                        : memory.read<std::int32_t>(pvars + kQuartuElectricLightSlot);
+                    drawable = pause_policy::can_draw_quartu_electric_arc(
+                        state, pvars, light_slot);
+                }
+
+                pause_policy::dispatch_quartu_electric_update(
+                    draw_only, drawable,
+                    [&] { original(moby); },
+                    [&] {
+                        const bool pal = game_mod->version() == "pal";
+                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::quartu_electric_bolt_code_address(pal));
+                        if (add == nullptr || draw == nullptr) {
+                            if (!quartu_electric_missing_draw_warned) {
+                                game_mod->warn("Quartu electric bolt draw function unavailable; shock update remains frozen");
+                                quartu_electric_missing_draw_warned = true;
+                            }
+                            return;
+                        }
+                        // The game stores code addresses in its callback list.
+                        // Passing `draw` (a native pointer) truncates it into
+                        // an invalid guest target and causes a port call error.
+                        pause_policy::enqueue_quartu_electric_bolt(pal, moby, add);
+                        if (!quartu_electric_first_draw_logged) {
+                            game_mod->info("Quartu electric bolt visual-only draw enqueued while gameplay is paused");
+                            quartu_electric_first_draw_logged = true;
+                        }
+                    });
+            });
+        quartu_electric_draw_hook = true;
+        mod.info("Quartu electric bolt draw-only hook registered (class 655)");
+    } catch (const openrac::Error&) {
+        mod.warn("Quartu class 655 hook unavailable; electric bolts remain paused");
+    }
+
     try {
         mod.on_moby_update(gate_moby_update);
         world_gate = true;
@@ -304,14 +382,14 @@ void load(openrac::Mod& mod) {
                                     pause_legacy_shade::colour_for_strength(
                                         background_softening_strength));
                                 if (!legacy_first_draw_logged) {
-                                    game_mod->info("experimental RAC1 background tint: first draw call made");
+                                    game_mod->info("RAC1 background tint: first draw call made");
                                     legacy_first_draw_logged = true;
                                 }
                             }
                         }
                         return original(panel);
                     });
-                mod.info("experimental RAC1 HUD-background tint hook registered (API 1.12 compatible)");
+                mod.info("RAC1 HUD-background tint hook registered (API 1.12 compatible)");
             } catch (const openrac::Error&) {
                 mod.warn("RAC1 HUD tint hook unavailable; world pause remains active");
             }
@@ -329,10 +407,10 @@ void load(openrac::Mod& mod) {
     });
 
     mod.info(world_gate
-                 ? "experimental pause: world updates gated; animation/scenery options active"
-                 : "experimental pause: Ratchet only; another mod owns the world gate");
+                 ? "weapon wheel pause: world updates gated; animation/scenery options active"
+                 : "weapon wheel pause: Ratchet only; another mod owns the world gate");
 }
 
 } // namespace
 
-OPENRAC_MOD_CPP("weapon-wheel-pause-test", "0.2.0-test.9", load)
+OPENRAC_MOD_CPP("weapon-wheel-pause-test", "1.0.0", load)

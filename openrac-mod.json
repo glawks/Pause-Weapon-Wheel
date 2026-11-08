@@ -1,10 +1,10 @@
 {
   "format": 2,
   "id": "weapon-wheel-pause-test",
-  "name": "Weapon Wheel Pause (Experimental Test)",
-  "version": "0.2.0-test.11",
+  "name": "Weapon Wheel Pause",
+  "version": "1.0.0",
   "author": "glawks",
-  "description": "Experimental RAC1 weapon wheel pause with animation freeze, scenery exemptions, and diagnostics.",
+  "description": "Pause RAC1 during Quick Select while preserving water, scenery and visual effects, with animation freezing and configurable background shading.",
   "license": "MIT",
   "api": "1.12",
   "games": { "rac1": ["pal", "ntsc"] },
@@ -22,7 +22,7 @@
       "name": "Keep water and scenery drawing",
       "type": "bool",
       "default": true,
-      "description": "Let known visual-effect controllers run each frame to draw Novalis water, Aridia mud, Hoven water, Oltanis effects and other water surfaces."
+      "description": "Let known visual-effect controllers run each frame to draw water, mud, ship glass and other scenery effects."
     },
     {
       "key": "hold_hoven_scroll",
