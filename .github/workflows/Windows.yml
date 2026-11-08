@@ -1,4 +1,4 @@
-name: windows-x64-test
+name: windows-x64
 on:
   push:
     branches: [master, main]
@@ -13,15 +13,23 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check out mod
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check out OpenRAC SDK 1.14.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: momo1212221/OpenRAC
-          ref: windows-ultra-current-20261106
+          repository: OpenRAC/OpenRAC
+          ref: sdk-v1.14.2
           path: .openrac
           persist-credentials: false
+      - name: Verify OpenRAC SDK API 1.14
+        run: |
+          sdk_version_file=.openrac/sdk/cmake/OpenRACModConfigVersion.cmake
+          test -f "$sdk_version_file"
+          grep -Fq 'set(PACKAGE_VERSION "1.14")' "$sdk_version_file"
+          echo 'Using OpenRAC SDK 1.14.2 (mod API 1.14)'
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
@@ -30,7 +38,8 @@ jobs:
       - name: Set up MSVC
         shell: pwsh
         run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -property installationPath
+          if (-not $vs) { throw "No Visual Studio installation found" }
           cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" && set" | ForEach-Object {
             if ($_ -match '^([^=]+)=(.*)$') { "$($matches[1])=$($matches[2])" | Out-File -Append $env:GITHUB_ENV }
           }
@@ -42,6 +51,6 @@ jobs:
         run: python .openrac/sdk/tools/package_mod.py build-win/package/* -o dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: weapon-wheel-pause-test-windows-x86_64
+          name: weapon-wheel-pause-windows-x86_64
           path: dist/*.zip
           if-no-files-found: error
