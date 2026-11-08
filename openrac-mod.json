@@ -1,0 +1,42 @@
+{
+  "format": 2,
+  "id": "weapon-wheel-pause-test",
+  "name": "Weapon Wheel Pause (Experimental Test)",
+  "version": "0.2.0-test.4",
+  "author": "glawks",
+  "description": "Experimental RAC1 weapon wheel pause with animation freeze, scenery exemptions, and diagnostics.",
+  "license": "MIT",
+  "api": "1.12",
+  "games": { "rac1": ["pal", "ntsc"] },
+  "hooks": ["rac1.player.update", "rac1.hud.quick_select.update", "rac1.moby.moby1901.update"],
+  "settings": [
+    {
+      "key": "freeze_animations",
+      "name": "Freeze enemy animations",
+      "type": "bool",
+      "default": true,
+      "description": "Set the game's animation-skip bit on mobys whose gameplay update is paused."
+    },
+    {
+      "key": "keep_water",
+      "name": "Keep water and scenery drawing",
+      "type": "bool",
+      "default": true,
+      "description": "Let known visual-effect controllers run each frame to draw Hoven water, Oltanis effects and other water surfaces."
+    },
+    {
+      "key": "hold_hoven_scroll",
+      "name": "Freeze Hoven water scrolling",
+      "type": "bool",
+      "default": true,
+      "description": "Temporarily stop the game frame clock during Hoven's class 1901 update so the surface stays visible but its scrolling texture stays still."
+    },
+    {
+      "key": "diagnostic_log",
+      "name": "Log pause diagnostics",
+      "type": "bool",
+      "default": true,
+      "description": "When the weapon wheel closes, log the observed moby classes and which ones were exempted, for investigating missing scenery."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(weapon_wheel_pause_test LANGUAGES C CXX)
+
+if(NOT OpenRACMod_DIR)
+  if(DEFINED OPENRAC_SDK)
+    set(OpenRACMod_DIR "${OPENRAC_SDK}/cmake")
+  endif()
+endif()
+find_package(OpenRACMod 1.12 REQUIRED)
+openrac_add_mod(weapon_wheel_pause_test MANIFEST openrac-mod.json SOURCES src/mod.cpp)
