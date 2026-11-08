@@ -57,7 +57,9 @@ To build the Windows x64 package:
 1. Push the project files to a GitHub repository.
 2. Open **Actions → windows-x64 → Run workflow**, or push to `main`/`master`.
 3. Download the **weapon-wheel-pause-windows-x86_64** artifact after the workflow succeeds.
-4. Install the OpenRAC-compatible mod ZIP inside that artifact through OpenRAC's **Mods** tab.
+4. Extract the Actions artifact ZIP, then install the **mod ZIP inside it** through OpenRAC's **Mods** tab. Do not install the outer Actions artifact ZIP.
+
+GitHub Releases contain the mod ZIP directly, named `weapon-wheel-pause-1.0.0-windows-x86_64.zip`. That is the file OpenRAC's mod installer expects for this release.
 
 For a local Windows build with MSVC, CMake, Ninja and the [OpenRAC mod SDK 1.14.2](https://github.com/OpenRAC/OpenRAC/tree/sdk-v1.14.2/sdk) (or a newer SDK providing API 1.14+):
 
@@ -68,7 +70,7 @@ cmake --build build-win --parallel
 
 The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag (SDK API **1.14**). The manifest still targets minimum runtime API **1.12**, so the mod remains loadable on older compatible OpenRAC versions. At runtime, API 1.14+ uses the optional feathered overlay for background shading; API 1.12–1.13 falls back to RAC1's existing rectangle renderer. Both are tints rather than sampled blurs.
 
-**Existing installations:** The internal mod ID remains `weapon-wheel-pause-test` for compatibility with the builds and settings used during development. The visible mod name and version are now **Weapon Wheel Pause 1.0.0**.
+**Upgrading from test builds:** The stable internal mod ID is now `weapon-wheel-pause` (previously `weapon-wheel-pause-test`). OpenRAC may treat these as separate mods. Remove the old test build after installing the stable release, and reapply any settings tied to the old ID if necessary.
 
 ## Known limitations
 
