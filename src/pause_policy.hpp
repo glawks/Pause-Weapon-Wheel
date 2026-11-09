@@ -135,6 +135,39 @@ void enqueue_vendor_effects(bool pal, std::uint32_t moby, Enqueue enqueue) {
     enqueue(vendor_effect_code_address(pal), moby);
 }
 
+// The held Swingshot (class 208) normally submits its cable draw from its
+// gameplay update. That update also moves the grappling hook and changes
+// grapple/hero states, so it must remain gated throughout Quick Select.
+// Submit the cable render callback directly from the moby gate instead.
+constexpr bool should_route_swingshot_cable(bool wheel_active, bool keep_scenery,
+                                            bool world_gate, int oclass) {
+    return wheel_active && keep_scenery && world_gate && oclass == 208;
+}
+
+// Only states that enqueue draw_swingshot_cable in the retail update. The
+// cable renderer dereferences the hook pointer in pvars+0x14; never call it
+// for an uninitialized hook or one whose moby was deleted/reused.
+constexpr bool can_draw_swingshot_cable(std::uint8_t state, std::uint32_t pvars,
+                                       std::uint32_t hook, int hook_oclass,
+                                       std::uint8_t hook_state) {
+    const bool cable_active = (state >= 2 && state <= 7)
+                              || (state >= 9 && state <= 14);
+    return cable_active && pvars != 0 && hook != 0 && hook_oclass == 209
+           && hook_state != 0xFD && hook_state != 0xFE;
+}
+
+// Original guest addresses: PAL from RAC1 decomp func_L00_002C7128;
+// NTSC-U from the counterpart in Lombyte's disassembly (0x002C5DC8).
+// AddDrawCallback's list stores *guest addresses*, not native pointers.
+constexpr std::uint32_t swingshot_cable_code_address(bool pal) {
+    return pal ? 0x002C7128u : 0x002C5DC8u;
+}
+
+template <typename Enqueue>
+void enqueue_swingshot_cable(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(swingshot_cable_code_address(pal), moby);
+}
+
 struct VendorPhaseAddresses {
     std::uint32_t sparkle_uv;
     std::uint32_t glow;

@@ -3,7 +3,7 @@
 **Version 1.0.1 — working release**
 
 > The `testing` branch may contain unreleased changes. Its Gadgetron vendor
-> visual-only pause handling is experimental until verified in-game.
+> and Swingshot cable visual-only fixes are experimental until verified in-game.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -17,6 +17,7 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
 - **Keep Gadgetron vendor effects visible (testing).** Preserve the blue beam, lettering and glow while holding the vendor's ordinary state changes, rotations and texture phases still.
+- **Keep Swingshot cables visible (testing).** Requeue the grappling cable's existing draw callback when the wheel is open, without moving Ratchet, the Swingshot or its hook. Only an initialized cable in an active grapple state is drawn.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
 - **Optional diagnostics.** Log observed moby classes and scenery exemptions when Quick Select closes.
 
@@ -86,14 +87,17 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
 - The `testing` branch's vendor visual-only callback and frozen glow phases still need in-game verification on NTSC-U and PAL.
+- The `testing` branch's Swingshot cable rendering is also unverified in-game; it targets the cable from Ratchet's equipped Swingshot to its hook during an active grapple, not unrelated beams or effects between level props.
 
 ## Technical notes
 
-`src/mod.cpp` contains the OpenRAC hooks and main pause loop. `src/pause_policy.hpp` holds the level-specific scenery rules and vendor visual-only policy; `src/pause_legacy_shade.hpp` and `src/pause_veil.hpp` contain the two background-shading paths.
+`src/mod.cpp` contains the OpenRAC hooks and main pause loop. `src/pause_policy.hpp` holds the level-specific scenery rules and visual-only policies; `src/pause_legacy_shade.hpp` and `src/pause_veil.hpp` contain the two background-shading paths.
 
 Most water/scenery surfaces register a **draw callback each frame** from a moby update. Skipping every moby update freezes gameplay but also removes those surfaces. This mod keeps the required rendering controllers active, with a separate draw-only exception for Quartu's damaging electrical-water controller (class `655`).
 
 Quartu's electric-bolt callback uses the game's **32-bit code address**, rather than a native function pointer: `0x002D8710` on NTSC-U and `0x002D9B00` on PAL. The normal electric-water update—which can damage Ratchet—remains blocked during Quick Select.
+
+The Swingshot (class `208`) registers a separate cable draw callback while grappling. Its game update, and its hook's class `209` update, are still skipped. Only live hook objects owned by that Swingshot can enqueue the callback (`0x002C5DC8` NTSC-U / `0x002C7128` PAL).
 
 Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
 

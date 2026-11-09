@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 
 int main() {
     using namespace pause_policy;
@@ -182,6 +183,39 @@ int main() {
     assert(queued_moby == 0x123456u);
     enqueue_vendor_effects(true, 0x654321u, capture_guest_draw);
     assert(queued_code == 0x002A62D0u); // PAL vendor draw guest code
+    assert(queued_moby == 0x654321u);
+
+    // The Swingshot cable is normally queued by its gameplay update, which
+    // must stay frozen while Quick Select is open. Only class 208 owns the
+    // cable; class 209 is its separate hook, not another cable renderer.
+    assert(should_route_swingshot_cable(true, true, true, 208));
+    assert(!should_route_swingshot_cable(false, true, true, 208));
+    assert(!should_route_swingshot_cable(true, false, true, 208));
+    assert(!should_route_swingshot_cable(true, true, false, 208));
+    assert(!should_route_swingshot_cable(true, true, true, 209));
+    assert(!should_route_swingshot_cable(true, true, true, 758));
+    assert(!needs_update_for_water(12, 208)); // Never release its full update.
+
+    // Exact states where RAC1's Swingshot update registers the cable draw.
+    const std::uint8_t active_cable_states[] =
+        {2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14};
+    for (const auto state : active_cable_states) {
+        assert(can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 1));
+        assert(!can_draw_swingshot_cable(state, 0, 0x2000u, 209, 1));
+        assert(!can_draw_swingshot_cable(state, 0x1000u, 0, 209, 1));
+        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 208, 1));
+        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 0xFE));
+        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 0xFD));
+    }
+    for (const std::uint8_t state : {0, 1, 8, 15, 0xFD, 0xFE}) {
+        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 1));
+    }
+
+    enqueue_swingshot_cable(false, 0x123456u, capture_guest_draw);
+    assert(queued_code == 0x002C5DC8u); // NTSC-U cable code, not a host pointer
+    assert(queued_moby == 0x123456u);
+    enqueue_swingshot_cable(true, 0x654321u, capture_guest_draw);
+    assert(queued_code == 0x002C7128u); // PAL cable code
     assert(queued_moby == 0x654321u);
 
     const auto ntsc_vendor_phases = vendor_phase_addresses(false);
