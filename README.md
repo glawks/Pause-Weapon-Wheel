@@ -1,6 +1,6 @@
 # Weapon Wheel Pause for OpenRAC (Ratchet & Clank 1)
 
-**Version 1.0.0 — working release**
+**Version 1.0.1 — working release**
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
