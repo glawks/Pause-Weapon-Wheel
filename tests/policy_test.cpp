@@ -162,6 +162,23 @@ int main() {
     assert(!can_draw_vendor_effects(3, 0x1000u, 0x2000u));
     assert(!can_draw_vendor_effects(1, 0, 0x2000u));
     assert(!can_draw_vendor_effects(2, 0x1000u, 0));
+    // A phase of zero has full alpha but zero-area geometry. Hold a bright,
+    // visible mid-sized glow instead of freezing at an arbitrary dim phase.
+    assert(vendor_full_glow_alpha_phase() == 0.34f);
+    VendorBrightnessHold vendor_brightness;
+    vendor_brightness.capture(9, 0x300000u, 0x301000u, 123u, 0x400000u, 0.25f);
+    vendor_brightness.capture(9, 0x300000u, 0x301000u, 123u, 0x400000u, 0.75f);
+    assert(vendor_brightness.active && vendor_brightness.saved_glow == 0.25f);
+    float vendor_current_glow = 1.0f;
+    assert(!vendor_brightness.restore(8, 0x300000u, 0x301000u, 123u, 0x400000u,
+                                     [&](float) { assert(false); }));
+    assert(!vendor_brightness.restore(9, 0x300000u, 0x301000u, 124u, 0x400000u,
+                                     [&](float) { assert(false); }));
+    assert(vendor_brightness.restore(9, 0x300000u, 0x301000u, 123u, 0x400000u,
+                                     [&](float value) { vendor_current_glow = value; }));
+    assert(vendor_current_glow == 0.25f);
+    vendor_brightness.reset();
+    assert(!vendor_brightness.active);
 
     int vendor_updates = 0;
     int vendor_draws = 0;
@@ -185,8 +202,9 @@ int main() {
     assert(queued_code == 0x002A62D0u); // PAL vendor draw guest code
     assert(queued_moby == 0x654321u);
 
-    // Health crates create a separate class-806 Nanotech orb. Its update
-    // can heal Ratchet, so draw the initialized orb without running it.
+    // Health crates create a separate class-806 Nanotech orb. Only the
+    // attached state-1 update may replenish glow particles under a pause;
+    // the detached state-2 update can heal Ratchet and is never executed.
     assert(should_route_nanotech_draw(true, true, true, true, 806));
     assert(!should_route_nanotech_draw(false, true, true, true, 806));
     assert(!should_route_nanotech_draw(true, false, true, true, 806));
@@ -202,6 +220,12 @@ int main() {
     assert(!can_draw_nanotech_orb(1, 0, 0x2000u, 501));
     assert(!can_draw_nanotech_orb(1, 0x1000u, 0, 501));
     assert(!can_draw_nanotech_orb(1, 0x1000u, 0x2000u, 502));
+    assert(can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 501, 1));
+    assert(!can_emit_attached_nanotech_glow(2, 0x1000u, 0x2000u, 501, 1));
+    assert(!can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 501, 0xFE));
+    assert(!can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 501, 0x80));
+    assert(!can_emit_attached_nanotech_glow(1, 0, 0x2000u, 501, 1));
+    assert(!can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 502, 1));
 
     int nanotech_updates = 0;
     int nanotech_draws = 0;
@@ -217,6 +241,21 @@ int main() {
                              [&] { ++nanotech_updates; },
                              [&] { ++nanotech_draws; });
     assert(nanotech_updates == 1 && nanotech_draws == 1);
+    int nanotech_glow_emissions = 0;
+    dispatch_nanotech_visual_update(true, true, true,
+                                    [&] { assert(false); },
+                                    [&] { ++nanotech_draws; },
+                                    [&] { ++nanotech_glow_emissions; });
+    assert(nanotech_glow_emissions == 1 && nanotech_draws == 1);
+    dispatch_nanotech_visual_update(true, true, false,
+                                    [&] { assert(false); },
+                                    [&] { ++nanotech_draws; },
+                                    [&] { assert(false); });
+    assert(nanotech_glow_emissions == 1 && nanotech_draws == 2);
+    dispatch_nanotech_visual_update(true, false, false,
+                                    [&] { assert(false); },
+                                    [&] { assert(false); },
+                                    [&] { assert(false); });
     enqueue_nanotech_orb(false, 0x123456u, capture_guest_draw);
     assert(queued_code == 0x002D9810u && queued_moby == 0x123456u);
     enqueue_nanotech_orb(true, 0x654321u, capture_guest_draw);

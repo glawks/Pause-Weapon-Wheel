@@ -115,6 +115,57 @@ constexpr bool can_draw_vendor_effects(std::uint8_t state, std::uint32_t pvars,
     return (state == 1 || state == 2) && pvars != 0 && ring != 0;
 }
 
+// The vendor renderer scales its beam by pvars+0x90. Its glow quad grows as
+// phase increases but also loses alpha; phase zero is a point, not a visible
+// glow. The callback itself adds 0.01, so seed a bright, nonzero-sized phase.
+constexpr float vendor_full_glow_alpha_phase() {
+    return 0.34f; // Draws at 0.35: bright and visibly expanded.
+}
+
+// Keep the vendor's original glow value for when Quick Select closes. Guard
+// writes using the same level/array/slot/spawn/pvars identity so a recycled
+// moby cannot inherit the preceding vendor's brightness.
+struct VendorBrightnessHold {
+    bool active = false;
+    int level = -1;
+    std::uint32_t array_base = 0;
+    std::uint32_t moby = 0;
+    std::uint64_t spawn_frame = 0;
+    std::uint32_t pvars = 0;
+    float saved_glow = 0.0f;
+
+    void capture(int current_level, std::uint32_t current_array,
+                 std::uint32_t current_moby, std::uint64_t current_spawn,
+                 std::uint32_t current_pvars, float current_glow) {
+        if (!active || level != current_level || array_base != current_array
+            || moby != current_moby || spawn_frame != current_spawn
+            || pvars != current_pvars) {
+            active = true;
+            level = current_level;
+            array_base = current_array;
+            moby = current_moby;
+            spawn_frame = current_spawn;
+            pvars = current_pvars;
+            saved_glow = current_glow;
+        }
+    }
+
+    template <typename Write>
+    bool restore(int current_level, std::uint32_t current_array,
+                 std::uint32_t current_moby, std::uint64_t current_spawn,
+                 std::uint32_t current_pvars, Write write) const {
+        if (!active || level != current_level || array_base != current_array
+            || moby != current_moby || spawn_frame != current_spawn
+            || pvars != current_pvars) {
+            return false;
+        }
+        write(saved_glow);
+        return true;
+    }
+
+    void reset() { active = false; }
+};
+
 template <typename Original, typename Draw>
 void dispatch_vendor_update(bool draw_only, bool drawable, Original original, Draw draw) {
     if (!draw_only) {
@@ -151,6 +202,34 @@ constexpr bool can_draw_nanotech_orb(std::uint8_t state, std::uint32_t pvars,
                                     std::uint32_t owner, int owner_oclass) {
     return (state == 1 || state == 2) && pvars != 0 && owner != 0
            && owner_oclass == 501;
+}
+
+// Attached to a live crate (state 1), the retail update follows the crate
+// and emits the short-lived particles that form the visible purple halo.
+// Detached state 2 must NEVER execute its update while paused: that update
+// can home in on Ratchet and trigger a health collection.
+constexpr bool can_emit_attached_nanotech_glow(std::uint8_t state,
+                                               std::uint32_t pvars,
+                                               std::uint32_t owner,
+                                               int owner_oclass,
+                                               std::uint8_t owner_state) {
+    return state == 1 && pvars != 0 && owner != 0
+           && owner_oclass == 501 && owner_state < 0x80;
+}
+
+template <typename Original, typename Draw, typename Emit>
+void dispatch_nanotech_visual_update(bool draw_only, bool drawable,
+                                     bool emit_attached, Original original,
+                                     Draw draw, Emit emit) {
+    if (!draw_only) {
+        original();
+    } else if (drawable) {
+        if (emit_attached) {
+            emit(); // Original update queues its own draw: never queue twice.
+        } else {
+            draw();
+        }
+    }
 }
 
 template <typename Original, typename Draw>

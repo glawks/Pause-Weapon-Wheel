@@ -24,7 +24,10 @@ constexpr openrac::gaddr kMobyState = 0x20u;
 constexpr openrac::gaddr kMobyPvars = 0x78u;
 constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
 constexpr openrac::gaddr kVendorRingPtr = 0x0Cu;
+constexpr openrac::gaddr kVendorGlowStrength = 0x90u;
 constexpr openrac::gaddr kNanotechOwnerPtr = 0x0Cu;
+constexpr openrac::gaddr kNanotechBobOffset = 0x00u;
+constexpr openrac::gaddr kNanotechBobPhase = 0x04u;
 constexpr openrac::gaddr kMobyYaw = 0x48u;
 constexpr openrac::gaddr kPairedTargetSteeringVelocity = 0x38u;
 
@@ -61,10 +64,13 @@ bool vendor_missing_draw_warned = false;
 bool nanotech_draw_hook = false;
 bool nanotech_first_draw_logged = false;
 bool nanotech_missing_draw_warned = false;
+bool nanotech_missing_clocks_warned = false;
+bool nanotech_first_particle_refresh_logged = false;
 bool paired_target_effect_hook = false;
 bool paired_target_first_effect_logged = false;
 bool paired_target_missing_clocks_warned = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
+pause_policy::VendorBrightnessHold vendor_brightness;
 bool freeze_animations = true;
 bool keep_water = true;
 bool hold_hoven_scroll = true;
@@ -82,6 +88,9 @@ std::vector<FrozenAnimation> flagged_mobys;
 int observed_level = -1;
 std::set<int> observed_classes;
 std::set<int> exempted_classes;
+int vendor_visual_draw_count = 0;
+int nanotech_attached_glow_count = 0;
+int nanotech_visual_draw_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -104,10 +113,17 @@ void report_pause_diagnostics() {
                        + std::to_string(exempted_classes.size()));
         log_class_list("seen", observed_classes);
         log_class_list("exempted", exempted_classes);
+        game_mod->info("pause diagnostic visual updates: vendor_draw="
+                       + std::to_string(vendor_visual_draw_count)
+                       + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
+                       + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count));
     }
     observed_level = -1;
     observed_classes.clear();
     exempted_classes.clear();
+    vendor_visual_draw_count = 0;
+    nanotech_attached_glow_count = 0;
+    nanotech_visual_draw_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -272,10 +288,13 @@ void load(openrac::Mod& mod) {
     nanotech_draw_hook = false;
     nanotech_first_draw_logged = false;
     nanotech_missing_draw_warned = false;
+    nanotech_missing_clocks_warned = false;
+    nanotech_first_particle_refresh_logged = false;
     paired_target_effect_hook = false;
     paired_target_first_effect_logged = false;
     paired_target_missing_clocks_warned = false;
     vendor_phases.reset();
+    vendor_brightness.reset();
     flagged_mobys.clear();
     observed_level = -1;
     observed_classes.clear();
@@ -387,21 +406,28 @@ void load(openrac::Mod& mod) {
     // draws the blue beam/letters but also pulses the glow, rotates the ring,
     // checks proximity and can open the vendor menu. Keep all of that logic
     // paused and only enqueue its already-initialized visual draw function.
-    // Unlike Hoven's water, zero frame time is insufficient: both the update
-    // and the drawing function increment animation phases by fixed amounts.
+    // The beam renderer also reads a proximity-controlled glow strength from
+    // the vendor's pvars: hold it at full brightness and restore it on exit.
+    // Unlike Hoven's water, zero frame time is insufficient: the renderer
+    // increments its animation phases by fixed amounts.
     try {
         mod.hook<openrac::rac1::Moby_Vendor_Update>(
             [](auto original, std::uint32_t moby) {
                 const bool draw_only = pause_policy::should_route_vendor_draw(
                     wheel_active, keep_water, world_gate, vendor_draw_hook, 11);
                 bool drawable = false;
+                std::uint32_t pvars = 0;
                 if (draw_only && moby != 0) {
                     auto memory = game_mod->memory();
                     const auto state = memory.read<std::uint8_t>(moby + kMobyState);
-                    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                    pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
                     const auto ring = pvars == 0 ? 0u
                         : memory.read<std::uint32_t>(pvars + kVendorRingPtr);
-                    drawable = pause_policy::can_draw_vendor_effects(state, pvars, ring);
+                    const auto array_base = current_moby_array();
+                    drawable = pause_policy::can_draw_vendor_effects(state, pvars, ring)
+                        && is_moby_in_active_array(moby, array_base)
+                        && is_moby_in_active_array(ring, array_base)
+                        && memory.read<std::int16_t>(ring + kMobyClass) == 1143;
                 }
 
                 pause_policy::dispatch_vendor_update(
@@ -430,10 +456,20 @@ void load(openrac::Mod& mod) {
                             game_mod->loaded_level(),
                             memory.read<float>(sparkle_address),
                             memory.read<float>(glow_address));
+                        vendor_brightness.capture(
+                            game_mod->loaded_level(), current_moby_array(), moby,
+                            memory.read<std::uint64_t>(moby + kMobySpawnFrame),
+                            pvars, memory.read<float>(pvars + kVendorGlowStrength));
+                        // The queued renderer reads these values later this
+                        // frame, so they must stay in guest memory until draw.
+                        memory.write<float>(pvars + kVendorGlowStrength, 1.0f);
+                        memory.write<float>(glow_address,
+                            pause_policy::vendor_full_glow_alpha_phase());
                         // The callback list stores the 32-bit guest address.
                         pause_policy::enqueue_vendor_effects(pal, moby, add);
+                        ++vendor_visual_draw_count;
                         if (!vendor_first_draw_logged) {
-                            game_mod->info("Gadgetron vendor visual-only draw enqueued while gameplay is paused");
+                            game_mod->info("Gadgetron vendor bright stationary beam/letters draw enqueued");
                             vendor_first_draw_logged = true;
                         }
                     });
@@ -444,20 +480,24 @@ void load(openrac::Mod& mod) {
         mod.warn("Gadgetron class 11 hook unavailable; vendor visuals remain paused");
     }
 
-    // Nanotech boxes (501) create a class-806 visual orb. Its update also
-    // tracks/collects health, moves particles and can change Ratchet's HP.
-    // Draw the existing glow only, retaining the orb's held position and
-    // pulse phase instead of running those gameplay changes.
+    // Nanotech boxes (501) create a class-806 orb. Draw-only rendering omits
+    // the particles that form its bright purple halo. While still attached
+    // to a live crate (state 1), its original update cannot collect health;
+    // run that update with motion clocks and bobbing frozen to renew the
+    // halo. Detached orbs (state 2) remain strictly draw-only, as their
+    // original update can home in on Ratchet and heal him.
     try {
         mod.hook<openrac::rac1::Moby_NanotechBall_Update>(
             [](auto original, std::uint32_t moby) {
                 const bool draw_only = pause_policy::should_route_nanotech_draw(
                     wheel_active, keep_water, world_gate, nanotech_draw_hook, 806);
                 bool drawable = false;
+                bool emit_attached = false;
+                std::uint32_t pvars = 0;
                 if (draw_only && moby != 0) {
                     auto memory = game_mod->memory();
                     const auto state = memory.read<std::uint8_t>(moby + kMobyState);
-                    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                    pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
                     const auto owner = pvars == 0 ? 0u
                         : memory.read<std::uint32_t>(pvars + kNanotechOwnerPtr);
                     const auto array_base = current_moby_array();
@@ -465,11 +505,28 @@ void load(openrac::Mod& mod) {
                         const auto owner_class = memory.read<std::int16_t>(owner + kMobyClass);
                         drawable = pause_policy::can_draw_nanotech_orb(
                             state, pvars, owner, owner_class);
+                        emit_attached = pause_policy::can_emit_attached_nanotech_glow(
+                            state, pvars, owner, owner_class,
+                            memory.read<std::uint8_t>(owner + kMobyState));
                     }
                 }
 
-                pause_policy::dispatch_nanotech_update(
-                    draw_only, drawable,
+                const auto clocks = pause_policy::paired_swingshot_motion_clock_addresses(
+                    game_mod->version() == "pal");
+                const auto time_addr = emit_attached
+                    ? game_mod->relocate(clocks.frame_time) : 0u;
+                const auto sq_addr = emit_attached
+                    ? game_mod->relocate(clocks.frame_time_squared) : 0u;
+                if (emit_attached && (time_addr == 0 || sq_addr == 0)) {
+                    emit_attached = false;
+                    if (!nanotech_missing_clocks_warned) {
+                        game_mod->warn("Nanotech particle clocks unavailable; drawing orb without refreshing its halo");
+                        nanotech_missing_clocks_warned = true;
+                    }
+                }
+
+                pause_policy::dispatch_nanotech_visual_update(
+                    draw_only, drawable, emit_attached,
                     [&] { original(moby); },
                     [&] {
                         const bool pal = game_mod->version() == "pal";
@@ -485,14 +542,40 @@ void load(openrac::Mod& mod) {
                             return;
                         }
                         pause_policy::enqueue_nanotech_orb(pal, moby, add);
+                        ++nanotech_visual_draw_count;
                         if (!nanotech_first_draw_logged) {
                             game_mod->info("Nanotech orb visual-only draw enqueued during Quick Select");
                             nanotech_first_draw_logged = true;
                         }
+                    },
+                    [&] {
+                        auto memory = game_mod->memory();
+                        pause_policy::with_preserved_motion_pair(
+                            [&] { return memory.read<float>(pvars + kNanotechBobOffset); },
+                            [&](float value) {
+                                memory.write<float>(pvars + kNanotechBobOffset, value);
+                            },
+                            [&] { return memory.read<float>(pvars + kNanotechBobPhase); },
+                            [&](float value) {
+                                memory.write<float>(pvars + kNanotechBobPhase, value);
+                            },
+                            [&] {
+                                pause_policy::with_stopped_motion_clocks(
+                                    [&] { return memory.read<float>(time_addr); },
+                                    [&](float value) { memory.write<float>(time_addr, value); },
+                                    [&] { return memory.read<float>(sq_addr); },
+                                    [&](float value) { memory.write<float>(sq_addr, value); },
+                                    [&] { original(moby); });
+                            });
+                        ++nanotech_attached_glow_count;
+                        if (!nanotech_first_particle_refresh_logged) {
+                            game_mod->info("Nanotech crate halo particles refreshed with orb motion held");
+                            nanotech_first_particle_refresh_logged = true;
+                        }
                     });
             });
         nanotech_draw_hook = true;
-        mod.info("Nanotech orb draw-only hook registered (class 806)");
+        mod.info("Nanotech attached-halo / detached draw-only hook registered (class 806)");
     } catch (const openrac::Error&) {
         mod.warn("Nanotech orb hook unavailable; health boxes stay paused without glow");
     }
@@ -630,10 +713,37 @@ void load(openrac::Mod& mod) {
             report_pause_diagnostics();
         }
 
+        if (vendor_brightness.active) {
+            const int level = game_mod->loaded_level();
+            const auto array_base = current_moby_array();
+            if (!wheel_active || !keep_water || !world_gate || !vendor_draw_hook
+                || vendor_brightness.level != level
+                || vendor_brightness.array_base != array_base) {
+                // Restoring the glow on a reused slot would corrupt an
+                // unrelated moby, so compare all original identifiers.
+                if (vendor_brightness.level == level
+                    && vendor_brightness.array_base == array_base
+                    && is_moby_in_active_array(vendor_brightness.moby, array_base)) {
+                    auto memory = game_mod->memory();
+                    const auto old_moby = vendor_brightness.moby;
+                    if (memory.read<std::int16_t>(old_moby + kMobyClass) == 11) {
+                        vendor_brightness.restore(
+                            level, array_base, old_moby,
+                            memory.read<std::uint64_t>(old_moby + kMobySpawnFrame),
+                            memory.read<std::uint32_t>(old_moby + kMobyPvars),
+                            [&](float glow) {
+                                memory.write<float>(vendor_brightness.pvars
+                                                    + kVendorGlowStrength, glow);
+                            });
+                    }
+                }
+                vendor_brightness.reset();
+            }
+        }
+
         if (vendor_phases.active) {
             const int level = game_mod->loaded_level();
-            if (!wheel_active || !keep_water || !world_gate || !vendor_draw_hook
-                || vendor_phases.level != level) {
+            if (vendor_phases.level != level) {
                 vendor_phases.reset();
             } else {
                 const auto addresses = pause_policy::vendor_phase_addresses(
@@ -646,8 +756,14 @@ void load(openrac::Mod& mod) {
                     auto memory = game_mod->memory();
                     vendor_phases.restore(level, [&](float uv, float phase) {
                         memory.write<float>(sparkle, uv);
-                        memory.write<float>(glow, phase);
+                        memory.write<float>(glow,
+                            wheel_active && keep_water && world_gate && vendor_draw_hook
+                                ? pause_policy::vendor_full_glow_alpha_phase()
+                                : phase);
                     });
+                    if (!wheel_active || !keep_water || !world_gate || !vendor_draw_hook) {
+                        vendor_phases.reset();
+                    }
                 }
             }
         }

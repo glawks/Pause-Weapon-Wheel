@@ -2,8 +2,9 @@
 
 **Version 1.0.1 — working release**
 
-> The `testing` branch may contain unreleased changes. Its Gadgetron vendor,
-> paired Swingshot target and Nanotech glow fixes are experimental until verified in-game.
+> The `testing` branch contains unreleased experiments. The paired Swingshot
+> connection was confirmed working in-game; the newer Gadgetron and Nanotech
+> brightness changes still need testing.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -16,11 +17,11 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep scenery visible.** Allow the specific controllers needed to register water, mud, lava, glass and environmental draw callbacks each frame.
 - **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
-- **Keep Gadgetron vendor effects visible (testing).** Preserve the blue beam, lettering and glow while holding the vendor's ordinary state changes, rotations and texture phases still.
+- **Keep Gadgetron vendor effects visible (testing).** Queue the blue beam's draw callback at full proximity glow strength and a bright, stationary glow phase while holding shop interactions and rotation still. Restore the original glow strength when the wheel closes.
 - **Keep yellow paired Swingshot targets glowing (testing).** Replenish the particle stream connecting the two yellow spheres while temporarily stopping the target's motion clocks.
-- **Keep Nanotech crate glows visible (testing).** Draw the initialized glowing Nanotech spheres using the game's original draw callback without moving them or running health-collection logic.
+- **Keep Nanotech crate glows visible (testing).** Refresh the attached orb's purple particle halo with the orb's movement clocks and bobbing held; detached orbs remain strictly draw-only, without running health-collection logic.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
-- **Optional diagnostics.** Log observed moby classes and scenery exemptions when Quick Select closes.
+- **Optional diagnostics.** Log observed moby classes, scenery exemptions, and counts of vendor draw callbacks and Nanotech halo updates when Quick Select closes.
 
 ### Verified scenery fixes
 
@@ -87,9 +88,9 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The mod needs OpenRAC's exclusive moby-update gate. If another mod owns that gate, this mod can freeze Ratchet but cannot fully pause the world.
 - Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
-- The `testing` branch's vendor visual-only callback and frozen glow phases still need in-game verification on NTSC-U and PAL.
-- The `testing` branch's yellow paired Swingshot target fix is still unverified. Its connection consists of short-lived particles, which may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
-- The Nanotech crate glow fix keeps the main sphere drawn without running its health-collection update. Additional sparkle particles may still fade while paused; in-game testing will show if they need separate handling.
+- The `testing` branch's vendor brightness override and visual-only callback still need in-game verification on NTSC-U and PAL. If the vendor was off when paused, its beam may appear brighter than its ordinary distance-based fade.
+- The yellow paired Swingshot target's connection was confirmed visible in the initial user test. Its short-lived particles may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
+- The Nanotech crate halo now refreshes particles only while the orb is attached to an intact crate. Detached orbs are draw-only to keep collection/healing paused. Particle motion and PAL behaviour still need in-game verification.
 
 ## Technical notes
 
@@ -99,7 +100,7 @@ Most water/scenery surfaces register a **draw callback each frame** from a moby 
 
 Quartu's electric-bolt callback uses the game's **32-bit code address**, rather than a native function pointer: `0x002D8710` on NTSC-U and `0x002D9B00` on PAL. The normal electric-water update—which can damage Ratchet—remains blocked during Quick Select.
 
-Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow draw callback is `0x002D9810` (NTSC-U) or `0x002DACC0` (PAL). Its normal gameplay update stays frozen, even when the glow is drawn.
+Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow draw callback is `0x002D9810` (NTSC-U) or `0x002DACC0` (PAL). The attached orb's state-1 update produces its short-lived halo particles and cannot heal Ratchet while the crate is alive; we run that path with motion clocks and bobbing held. The detached state-2 update can heal Ratchet and remains blocked during pause.
 
 Yellow paired Swingshot targets are class `803`. Their state-1 update emits the connection's particles rather than registering a dedicated draw callback. The experimental hook runs that update with its two movement clocks temporarily zeroed; class `758` targets remain frozen as before.
 
