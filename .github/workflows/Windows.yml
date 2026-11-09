@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_tag:
-        description: 'Optional existing release tag to publish or update (e.g. v1.0.0)'
+        description: 'Optional release tag to create or update (e.g. v1.0.0)'
         required: false
         type: string
 permissions:
@@ -89,6 +89,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && \
+             ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Creating missing Git tag $RELEASE_TAG at $GITHUB_SHA"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$RELEASE_TAG" \
+              -f "sha=$GITHUB_SHA"
+          fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/*.zip --clobber
             gh release edit "$RELEASE_TAG" --title "Weapon Wheel Pause $RELEASE_TAG"
