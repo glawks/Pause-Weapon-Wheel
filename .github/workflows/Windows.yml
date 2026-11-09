@@ -1,7 +1,7 @@
 name: windows-x64
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, testing]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -48,6 +48,10 @@ jobs:
             release_tag="$GITHUB_REF_NAME"
           elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             release_tag="$REQUESTED_RELEASE_TAG"
+            if [ -n "$release_tag" ] && [ "$GITHUB_REF_NAME" != "main" ] && [ "$GITHUB_REF_NAME" != "master" ]; then
+              echo "Releases may only be requested manually from main/master, not $GITHUB_REF_NAME"
+              exit 1
+            fi
           fi
           if [ -n "$release_tag" ]; then
             version=$(python -c 'import json; print(json.load(open("openrac-mod.json"))["version"])')

@@ -98,6 +98,85 @@ void enqueue_quartu_electric_bolt(bool pal, std::uint32_t moby, Enqueue enqueue)
     enqueue(quartu_electric_bolt_code_address(pal), moby);
 }
 
+// The shared Gadgetron vendor (class 11) queues a draw callback in states
+// 1/2, but its ordinary update also moves its rings and may open the shop.
+// Route only the drawing while Quick Select owns the world gate. Class 1143,
+// the vendor's ring, stays on the ordinary skipped-update path.
+constexpr bool should_route_vendor_draw(bool wheel_active, bool keep_scenery,
+                                        bool world_gate, bool draw_hook_installed,
+                                        int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && oclass == 11;
+}
+
+// A vendor in state 0 has not spawned its ring yet; state 3 is its menu.
+constexpr bool can_draw_vendor_effects(std::uint8_t state, std::uint32_t pvars,
+                                      std::uint32_t ring) {
+    return (state == 1 || state == 2) && pvars != 0 && ring != 0;
+}
+
+template <typename Original, typename Draw>
+void dispatch_vendor_update(bool draw_only, bool drawable, Original original, Draw draw) {
+    if (!draw_only) {
+        original();
+    } else if (drawable) {
+        draw();
+    }
+}
+
+// These are guest code addresses of draw_vendor_effects, not native host
+// pointers. NTSC-U's counterpart is verified in OpenRAC's carried source.
+constexpr std::uint32_t vendor_effect_code_address(bool pal) {
+    return pal ? 0x002A62D0u : 0x002A5040u;
+}
+
+template <typename Enqueue>
+void enqueue_vendor_effects(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(vendor_effect_code_address(pal), moby);
+}
+
+struct VendorPhaseAddresses {
+    std::uint32_t sparkle_uv;
+    std::uint32_t glow;
+};
+
+// The vendor's draw callback advances these globals unconditionally, even
+// with zero frame delta. Restore the held values once per frame while paused.
+constexpr VendorPhaseAddresses vendor_phase_addresses(bool pal) {
+    return pal ? VendorPhaseAddresses{0x0016145Cu, 0x00161460u}
+               : VendorPhaseAddresses{0x00161394u, 0x00161398u};
+}
+
+struct VendorVisualPhaseLock {
+    bool active = false;
+    int level = -1;
+    float sparkle_uv = 0.0f;
+    float glow = 0.0f;
+
+    void capture(int current_level, float current_sparkle_uv, float current_glow) {
+        if (!active || level != current_level) {
+            active = true;
+            level = current_level;
+            sparkle_uv = current_sparkle_uv;
+            glow = current_glow;
+        }
+    }
+
+    template <typename Write>
+    bool restore(int current_level, Write write) const {
+        if (!active || level != current_level) {
+            return false;
+        }
+        write(sparkle_uv, glow);
+        return true;
+    }
+
+    void reset() {
+        active = false;
+        level = -1;
+    }
+};
+
 // The Hoven renderer must keep executing to enqueue its draw, but its texture
 // phases should not advance while Quick Select is holding the world still.
 constexpr bool should_hold_hoven_scroll(bool wheel_active, int level,

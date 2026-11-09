@@ -16,7 +16,8 @@
   "hooks": [
     "rac1.player.update",
     "rac1.hud.quick_select.update",
-    "rac1.moby.moby1901.update"
+    "rac1.moby.moby1901.update",
+    "rac1.moby.light_beam.update"
   ],
   "settings": [
     {

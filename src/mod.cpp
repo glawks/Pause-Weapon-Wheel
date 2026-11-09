@@ -23,6 +23,7 @@ constexpr openrac::gaddr kMobyClass = 0xA6u;
 constexpr openrac::gaddr kMobyState = 0x20u;
 constexpr openrac::gaddr kMobyPvars = 0x78u;
 constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
+constexpr openrac::gaddr kVendorRingPtr = 0x0Cu;
 
 // Game-code addresses from the RAC1 PAL and NTSC-U decompilations. Both
 // callbacks are resolved for the current loaded level; nothing is patched in
@@ -51,6 +52,10 @@ bool world_gate = false;
 bool quartu_electric_draw_hook = false;
 bool quartu_electric_first_draw_logged = false;
 bool quartu_electric_missing_draw_warned = false;
+bool vendor_draw_hook = false;
+bool vendor_first_draw_logged = false;
+bool vendor_missing_draw_warned = false;
+pause_policy::VendorVisualPhaseLock vendor_phases;
 bool freeze_animations = true;
 bool keep_water = true;
 bool hold_hoven_scroll = true;
@@ -193,7 +198,10 @@ int gate_moby_update(void*, int slot, int phase) {
         }
         observed_classes.insert(oclass);
     }
+    const bool vendor_draw_only = pause_policy::should_route_vendor_draw(
+        wheel_active, keep_water, world_gate, vendor_draw_hook, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
+                       || vendor_draw_only
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
@@ -202,6 +210,13 @@ int gate_moby_update(void*, int slot, int phase) {
         }
         // Class 655 is intercepted by the draw-only hook below; it never
         // reaches its original damaging update during Quick Select.
+        if (vendor_draw_only) {
+            // The vendor's ordinary update is skipped, but its visible
+            // animation can still be advanced earlier in the moby loop.
+            // Always freeze it while its visuals are kept, even when the
+            // separate "freeze enemy animations" option is disabled.
+            stop_animation(moby, array_base, level, oclass);
+        }
         return 0;
     }
 
@@ -230,6 +245,10 @@ void load(openrac::Mod& mod) {
     quartu_electric_draw_hook = false;
     quartu_electric_first_draw_logged = false;
     quartu_electric_missing_draw_warned = false;
+    vendor_draw_hook = false;
+    vendor_first_draw_logged = false;
+    vendor_missing_draw_warned = false;
+    vendor_phases.reset();
     flagged_mobys.clear();
     observed_level = -1;
     observed_classes.clear();
@@ -337,6 +356,67 @@ void load(openrac::Mod& mod) {
         mod.warn("Quartu class 655 hook unavailable; electric bolts remain paused");
     }
 
+    // Class 11 is the Gadgetron vendor on every planet. Its normal update
+    // draws the blue beam/letters but also pulses the glow, rotates the ring,
+    // checks proximity and can open the vendor menu. Keep all of that logic
+    // paused and only enqueue its already-initialized visual draw function.
+    // Unlike Hoven's water, zero frame time is insufficient: both the update
+    // and the drawing function increment animation phases by fixed amounts.
+    try {
+        mod.hook<openrac::rac1::Moby_Vendor_Update>(
+            [](auto original, std::uint32_t moby) {
+                const bool draw_only = pause_policy::should_route_vendor_draw(
+                    wheel_active, keep_water, world_gate, vendor_draw_hook, 11);
+                bool drawable = false;
+                if (draw_only && moby != 0) {
+                    auto memory = game_mod->memory();
+                    const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                    const auto ring = pvars == 0 ? 0u
+                        : memory.read<std::uint32_t>(pvars + kVendorRingPtr);
+                    drawable = pause_policy::can_draw_vendor_effects(state, pvars, ring);
+                }
+
+                pause_policy::dispatch_vendor_update(
+                    draw_only, drawable,
+                    [&] { original(moby); },
+                    [&] {
+                        const bool pal = game_mod->version() == "pal";
+                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::vendor_effect_code_address(pal));
+                        const auto phase_addresses = pause_policy::vendor_phase_addresses(pal);
+                        const auto sparkle_address = game_mod->relocate(phase_addresses.sparkle_uv);
+                        const auto glow_address = game_mod->relocate(phase_addresses.glow);
+                        if (add == nullptr || draw == nullptr
+                            || sparkle_address == 0 || glow_address == 0) {
+                            if (!vendor_missing_draw_warned) {
+                                game_mod->warn("Gadgetron visual-only draw unavailable; vendor gameplay stays paused");
+                                vendor_missing_draw_warned = true;
+                            }
+                            return;
+                        }
+
+                        auto memory = game_mod->memory();
+                        vendor_phases.capture(
+                            game_mod->loaded_level(),
+                            memory.read<float>(sparkle_address),
+                            memory.read<float>(glow_address));
+                        // The callback list stores the 32-bit guest address.
+                        pause_policy::enqueue_vendor_effects(pal, moby, add);
+                        if (!vendor_first_draw_logged) {
+                            game_mod->info("Gadgetron vendor visual-only draw enqueued while gameplay is paused");
+                            vendor_first_draw_logged = true;
+                        }
+                    });
+            });
+        vendor_draw_hook = true;
+        mod.info("Gadgetron vendor draw-only hook registered (class 11)");
+    } catch (const openrac::Error&) {
+        mod.warn("Gadgetron class 11 hook unavailable; vendor visuals remain paused");
+    }
+
     try {
         mod.on_moby_update(gate_moby_update);
         world_gate = true;
@@ -402,6 +482,28 @@ void load(openrac::Mod& mod) {
             wheel_visible_for_overlay.store(false, std::memory_order_relaxed);
             restore_animations();
             report_pause_diagnostics();
+        }
+
+        if (vendor_phases.active) {
+            const int level = game_mod->loaded_level();
+            if (!wheel_active || !keep_water || !world_gate || !vendor_draw_hook
+                || vendor_phases.level != level) {
+                vendor_phases.reset();
+            } else {
+                const auto addresses = pause_policy::vendor_phase_addresses(
+                    game_mod->version() == "pal");
+                const auto sparkle = game_mod->relocate(addresses.sparkle_uv);
+                const auto glow = game_mod->relocate(addresses.glow);
+                if (sparkle == 0 || glow == 0) {
+                    vendor_phases.reset();
+                } else {
+                    auto memory = game_mod->memory();
+                    vendor_phases.restore(level, [&](float uv, float phase) {
+                        memory.write<float>(sparkle, uv);
+                        memory.write<float>(glow, phase);
+                    });
+                }
+            }
         }
         wheel_seen_this_tick = false;
     });

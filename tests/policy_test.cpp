@@ -142,6 +142,74 @@ int main() {
     enqueue_quartu_electric_bolt(true, 0x654321u, capture_guest_draw);
     assert(queued_code == 0x002D9B00u); // PAL guest address
     assert(queued_moby == 0x654321u);
+
+    // The Gadgetron vendor update draws its beam but also advances motion,
+    // changes proximity state and can open the shop. Keep the whole update
+    // gated and submit its existing draw callback only while paused.
+    assert(should_route_vendor_draw(true, true, true, true, 11));
+    assert(!should_route_vendor_draw(false, true, true, true, 11));
+    assert(!should_route_vendor_draw(true, false, true, true, 11));
+    assert(!should_route_vendor_draw(true, true, false, true, 11));
+    assert(!should_route_vendor_draw(true, true, true, false, 11));
+    assert(!should_route_vendor_draw(true, true, true, true, 1143));
+    assert(!should_route_vendor_draw(true, true, true, true, 655));
+
+    // States 1 and 2 have an initialized ring and live visual data.
+    assert(can_draw_vendor_effects(1, 0x1000u, 0x2000u));
+    assert(can_draw_vendor_effects(2, 0x1000u, 0x2000u));
+    assert(!can_draw_vendor_effects(0, 0x1000u, 0x2000u));
+    assert(!can_draw_vendor_effects(3, 0x1000u, 0x2000u));
+    assert(!can_draw_vendor_effects(1, 0, 0x2000u));
+    assert(!can_draw_vendor_effects(2, 0x1000u, 0));
+
+    int vendor_updates = 0;
+    int vendor_draws = 0;
+    dispatch_vendor_update(true, true,
+                           [&] { ++vendor_updates; },
+                           [&] { ++vendor_draws; });
+    assert(vendor_updates == 0 && vendor_draws == 1);
+    dispatch_vendor_update(true, false,
+                           [&] { ++vendor_updates; },
+                           [&] { ++vendor_draws; });
+    assert(vendor_updates == 0 && vendor_draws == 1);
+    dispatch_vendor_update(false, true,
+                           [&] { ++vendor_updates; },
+                           [&] { ++vendor_draws; });
+    assert(vendor_updates == 1 && vendor_draws == 1);
+
+    enqueue_vendor_effects(false, 0x123456u, capture_guest_draw);
+    assert(queued_code == 0x002A5040u); // NTSC-U vendor draw guest code
+    assert(queued_moby == 0x123456u);
+    enqueue_vendor_effects(true, 0x654321u, capture_guest_draw);
+    assert(queued_code == 0x002A62D0u); // PAL vendor draw guest code
+    assert(queued_moby == 0x654321u);
+
+    const auto ntsc_vendor_phases = vendor_phase_addresses(false);
+    assert(ntsc_vendor_phases.sparkle_uv == 0x00161394u);
+    assert(ntsc_vendor_phases.glow == 0x00161398u);
+    const auto pal_vendor_phases = vendor_phase_addresses(true);
+    assert(pal_vendor_phases.sparkle_uv == 0x0016145Cu);
+    assert(pal_vendor_phases.glow == 0x00161460u);
+
+    // The draw callback advances its UV/glow phases by fixed 0.01 steps,
+    // even with zero frame delta. Reapply the FIRST held values each tick;
+    // do not accidentally recapture each frame or write into a new level.
+    VendorVisualPhaseLock vendor_phases;
+    assert(!vendor_phases.active);
+    vendor_phases.capture(9, 0.25f, 0.75f);
+    vendor_phases.capture(9, 0.50f, 0.50f);
+    float visual_uv = 0.90f;
+    float visual_glow = 0.90f;
+    assert(vendor_phases.restore(9, [&](float uv, float glow) {
+        visual_uv = uv;
+        visual_glow = glow;
+    }));
+    assert(visual_uv == 0.25f && visual_glow == 0.75f);
+    assert(!vendor_phases.restore(8, [&](float, float) { assert(false); }));
+    vendor_phases.reset();
+    assert(!vendor_phases.active);
+    assert(!vendor_phases.restore(9, [&](float, float) { assert(false); }));
+
     assert(!needs_update_for_water(14, 1409));
     assert(!needs_update_for_water(16, 1567));
     // Kalebo III's ocean/horizon effect has its own renderer, and each

@@ -2,6 +2,9 @@
 
 **Version 1.0.1 — working release**
 
+> The `testing` branch may contain unreleased changes. Its Gadgetron vendor
+> visual-only pause handling is experimental until verified in-game.
+
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
 The visual fixes have been tested in-game on **NTSC-U** across the affected planets, including Quartu's electrified water. The manifest also supports PAL, but PAL and non-Windows gameplay have not been independently verified.
@@ -13,6 +16,7 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep scenery visible.** Allow the specific controllers needed to register water, mud, lava, glass and environmental draw callbacks each frame.
 - **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
+- **Keep Gadgetron vendor effects visible (testing).** Preserve the blue beam, lettering and glow while holding the vendor's ordinary state changes, rotations and texture phases still.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
 - **Optional diagnostics.** Log observed moby classes and scenery exemptions when Quick Select closes.
 
@@ -55,11 +59,13 @@ This repository contains **source code**, not a precompiled mod.
 To build the Windows x64 package:
 
 1. Push the project files to a GitHub repository.
-2. Open **Actions → windows-x64 → Run workflow**, or push to `main`/`master`.
+2. Open **Actions → windows-x64 → Run workflow**, or push to `main`/`master`. On the `testing` branch, every push automatically starts a Windows build and uploads an artifact without publishing a release.
 3. Download the **pause-weapon-wheel-windows-x86_64** artifact after the workflow succeeds.
 4. Extract the Actions artifact ZIP, then install the **mod ZIP inside it** through OpenRAC's **Mods** tab. Do not install the outer Actions artifact ZIP.
 
 A newly published GitHub Release will contain the installable mod ZIP directly, named `pause-weapon-wheel-1.0.0-windows-x86_64.zip` for version 1.0.0. Existing release assets using the previous ID are not renamed automatically.
+
+**Testing without a release:** open the latest successful `testing` Actions run, download the `pause-weapon-wheel-windows-x86_64` artifact, extract it, and install the mod ZIP inside using OpenRAC's Mods tab. The mod keeps ID `pause-weapon-wheel` and version `1.0.1` while testing, so it is not a separate side-by-side installation; retain the stable release ZIP if you want to switch back. Do not enter `publish_tag` for test builds.
 
 For a local Windows build with MSVC, CMake, Ninja and the [OpenRAC mod SDK 1.14.2](https://github.com/OpenRAC/OpenRAC/tree/sdk-v1.14.2/sdk) (or a newer SDK providing API 1.14+):
 
@@ -79,10 +85,11 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The mod needs OpenRAC's exclusive moby-update gate. If another mod owns that gate, this mod can freeze Ratchet but cannot fully pause the world.
 - Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
+- The `testing` branch's vendor visual-only callback and frozen glow phases still need in-game verification on NTSC-U and PAL.
 
 ## Technical notes
 
-`src/mod.cpp` contains the OpenRAC hooks and main pause loop. `src/pause_policy.hpp` holds the level-specific scenery rules; `src/pause_legacy_shade.hpp` and `src/pause_veil.hpp` contain the two background-shading paths.
+`src/mod.cpp` contains the OpenRAC hooks and main pause loop. `src/pause_policy.hpp` holds the level-specific scenery rules and vendor visual-only policy; `src/pause_legacy_shade.hpp` and `src/pause_veil.hpp` contain the two background-shading paths.
 
 Most water/scenery surfaces register a **draw callback each frame** from a moby update. Skipping every moby update freezes gameplay but also removes those surfaces. This mod keeps the required rendering controllers active, with a separate draw-only exception for Quartu's damaging electrical-water controller (class `655`).
 
