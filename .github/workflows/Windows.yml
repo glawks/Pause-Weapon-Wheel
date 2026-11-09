@@ -76,12 +76,12 @@ jobs:
       - name: Verify installable Windows package
         run: |
           version=$(python -c 'import json; print(json.load(open("openrac-mod.json"))["version"])')
-          package="dist/weapon-wheel-pause-$version-windows-x86_64.zip"
+          package="dist/pause-weapon-wheel-$version-windows-x86_64.zip"
           test -f "$package"
           python -c 'import sys,zipfile; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); assert "openrac-mod.json" in names; assert "lib/windows-x86_64/weapon_wheel_pause.dll" in names' "$package"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: weapon-wheel-pause-windows-x86_64
+          name: pause-weapon-wheel-windows-x86_64
           path: dist/*.zip
           if-no-files-found: error
       - name: Publish GitHub Release

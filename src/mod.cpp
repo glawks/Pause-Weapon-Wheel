@@ -413,4 +413,4 @@ void load(openrac::Mod& mod) {
 
 } // namespace
 
-OPENRAC_MOD_CPP("weapon-wheel-pause", "1.0.0", load)
+OPENRAC_MOD_CPP("pause-weapon-wheel", "1.0.0", load)

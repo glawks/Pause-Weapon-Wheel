@@ -1,14 +1,23 @@
 {
   "format": 2,
-  "id": "weapon-wheel-pause",
+  "id": "pause-weapon-wheel",
   "name": "Weapon Wheel Pause",
   "version": "1.0.0",
   "author": "glawks",
   "description": "Pause RAC1 during Quick Select while preserving water, scenery and visual effects, with animation freezing and configurable background shading.",
   "license": "MIT",
   "api": "1.12",
-  "games": { "rac1": ["pal", "ntsc"] },
-  "hooks": ["rac1.player.update", "rac1.hud.quick_select.update", "rac1.moby.moby1901.update"],
+  "games": {
+    "rac1": [
+      "pal",
+      "ntsc"
+    ]
+  },
+  "hooks": [
+    "rac1.player.update",
+    "rac1.hud.quick_select.update",
+    "rac1.moby.moby1901.update"
+  ],
   "settings": [
     {
       "key": "freeze_animations",
