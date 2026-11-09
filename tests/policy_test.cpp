@@ -206,19 +206,29 @@ int main() {
 
     // The vendor's original update also rotates the two ring manipulators
     // by a fixed amount even with zero frame time. Restore all eight
-    // quaternion components and rebuild its matrix after refreshing visuals.
+    // quaternion components and the sphere's size. The original state-1
+    // update writes a new ring scale, which caused a visible size change
+    // on opening Quick Select; preserve it before rebuilding the matrix.
     float vendor_ring_quats[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    float vendor_ring_scale = 2.35f;
     int vendor_matrix_rebuilds = 0;
-    with_vendor_ring_rotations_held(
+    with_vendor_ring_pose_held(
         [&](int i) { return vendor_ring_quats[i]; },
         [&](int i, float v) { vendor_ring_quats[i] = v; },
+        [&] { return vendor_ring_scale; },
+        [&](float v) { vendor_ring_scale = v; },
         [&] {
             for (float& v : vendor_ring_quats) v = 99.0f;
+            vendor_ring_scale = 1.5f; // Simulates original vendor_update.
         },
-        [&] { ++vendor_matrix_rebuilds; });
+        [&] {
+            assert(vendor_ring_scale == 2.35f);
+            ++vendor_matrix_rebuilds;
+        });
     for (int i = 0; i < 8; ++i) {
         assert(vendor_ring_quats[i] == static_cast<float>(i + 1));
     }
+    assert(vendor_ring_scale == 2.35f);
     assert(vendor_matrix_rebuilds == 1);
 
     int vendor_updates = 0;

@@ -205,20 +205,25 @@ void with_vendor_visual_state(ReadState read_state, WriteState write_state,
     write_glow(1.0f);
 }
 
-// vendor_update writes two 4-float ring quaternions even with motion clocks
-// stopped. Put their original values back and rebuild the cached ring pose;
-// this keeps the letters stationary while the original update draws the beam.
-template <typename Read, typename Write, typename Update, typename Rebuild>
-void with_vendor_ring_rotations_held(Read read, Write write,
-                                     Update update, Rebuild rebuild) {
+// vendor_update writes two 4-float ring quaternions and recalculates the
+// class-1143 sphere's scale even with motion clocks stopped. Put the original
+// pose AND size back before rebuilding its cached matrix so the floating
+// vendor does not visibly shrink when Quick Select opens.
+template <typename Read, typename Write, typename ReadScale,
+          typename WriteScale, typename Update, typename Rebuild>
+void with_vendor_ring_pose_held(Read read, Write write,
+                                ReadScale read_scale, WriteScale write_scale,
+                                Update update, Rebuild rebuild) {
     float saved[8]{};
     for (int i = 0; i < 8; ++i) {
         saved[i] = read(i);
     }
+    const float saved_scale = read_scale();
     const auto restore = [&] {
         for (int i = 0; i < 8; ++i) {
             write(i, saved[i]);
         }
+        write_scale(saved_scale);
         rebuild();
     };
     try {

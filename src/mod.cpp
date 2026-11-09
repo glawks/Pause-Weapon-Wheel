@@ -17,6 +17,7 @@ constexpr openrac::gaddr kNtscMobyArrayGlobal = 0x0015FF18u;
 constexpr openrac::gaddr kPalFrameTimeGlobal = 0x0015EE7Cu;
 constexpr openrac::gaddr kNtscFrameTimeGlobal = 0x0015ED7Cu;
 constexpr openrac::gaddr kMobySize = 0x100u;
+constexpr openrac::gaddr kMobyScale = 0x2Cu;
 constexpr openrac::gaddr kMobyFlags = 0x34u;
 constexpr openrac::gaddr kMobySpawnFrame = 0x38u;
 constexpr openrac::gaddr kMobyClass = 0xA6u;
@@ -422,8 +423,8 @@ void load(openrac::Mod& mod) {
     // the vendor ring's cached matrices. Hand-queuing its draw did not keep
     // the beam visible in-game. Reuse the original state-1 visual setup,
     // forcing a non-proximity frame tick so it cannot enter state 2 or the
-    // shop menu. Restore the real state, frame counter and ring rotations
-    // immediately, and keep its glow at full strength until Quick Select
+    // shop menu. Restore the real state, frame counter, ring rotations and
+    // sphere scale immediately, and keep its glow at full strength until Quick Select
     // closes. Class 1143's separate orb motion remains paused by the gate.
     try {
         mod.hook<openrac::rac1::Moby_Vendor_Update>(
@@ -495,7 +496,7 @@ void load(openrac::Mod& mod) {
                                     memory.write<float>(pvars + kVendorGlowStrength, v);
                                 },
                                 [&] {
-                                    pause_policy::with_vendor_ring_rotations_held(
+                                    pause_policy::with_vendor_ring_pose_held(
                                         [&](int i) {
                                             const auto offset = i < 4
                                                 ? kVendorRingAQuaternion + static_cast<std::uint32_t>(i) * 4u
@@ -509,6 +510,10 @@ void load(openrac::Mod& mod) {
                                                 : kVendorRingBQuaternion
                                                     + static_cast<std::uint32_t>(i - 4) * 4u;
                                             memory.write<float>(pvars + offset, v);
+                                        },
+                                        [&] { return memory.read<float>(ring + kMobyScale); },
+                                        [&](float v) {
+                                            memory.write<float>(ring + kMobyScale, v);
                                         },
                                         [&] { original(moby); },
                                         [&] { rebuild(ring); });

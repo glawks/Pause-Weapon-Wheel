@@ -3,8 +3,8 @@
 **Version 1.0.1 — working release**
 
 > The `testing` branch contains unreleased experiments. The paired Swingshot
-> connection and Nanotech halo are confirmed working in-game. The Gadgetron
-> vendor's guarded visual-update experiment still needs testing.
+> connection, Nanotech halo and Gadgetron vendor beam are confirmed working
+> in NTSC-U testing. The vendor sphere-size hold still needs verification.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -17,7 +17,7 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep scenery visible.** Allow the specific controllers needed to register water, mud, lava, glass and environmental draw callbacks each frame.
 - **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
-- **Keep Gadgetron vendor effects visible (testing).** Refresh the beam through the vendor's original non-interactive update, then restore its state and held ring rotation. The glow is kept at full strength and its previous value restored after Quick Select closes.
+- **Keep Gadgetron vendor effects visible (testing).** Refresh the beam through the vendor's original non-interactive update, then restore its state, held ring rotation and original sphere scale. The glow is kept at full strength and its previous value restored after Quick Select closes.
 - **Keep yellow paired Swingshot targets glowing (testing).** Replenish the particle stream connecting the two yellow spheres while temporarily stopping the target's motion clocks.
 - **Keep Nanotech crate glows visible (testing).** Refresh the attached orb's purple particle halo with the orb's movement clocks and bobbing held; detached orbs remain strictly draw-only, without running health-collection logic.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
@@ -88,7 +88,7 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The mod needs OpenRAC's exclusive moby-update gate. If another mod owns that gate, this mod can freeze Ratchet but cannot fully pause the world.
 - Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
-- The `testing` branch's vendor update now executes only the original state-1 drawing and matrix setup with proximity checks disabled, even for a vendor normally in state 2. Its menu/action state is restored afterward. This version is **not yet confirmed in-game** and can expose brightness or rotation quirks. The internal ring angle counters still advance, although the ring's visible quaternion/matrix is restored while paused; the ring may snap to the advanced angle after unpausing. If the vendor was off when paused, its beam may appear brighter than its ordinary distance-based fade.
+- The `testing` branch's vendor beam was confirmed visible in NTSC-U after allowing the original state-1 visual update with proximity checks disabled. The vendor's ring scale is now held at its pre-pause value because the original refresh had made the sphere shrink. This size correction still needs in-game verification. The internal ring angle counters still advance, although the ring's visible quaternion/matrix is restored while paused; it may snap to the advanced angle after unpausing. If the vendor was off when paused, its beam may appear brighter than its ordinary distance-based fade.
 - The yellow paired Swingshot target's connection was confirmed visible in the initial user test. Its short-lived particles may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
 - The Nanotech crate's attached purple halo was confirmed working in NTSC-U testing. Detached orbs remain draw-only to keep collection/healing paused; PAL behaviour remains unverified.
 
