@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
-#include <initializer_list>
+#include <stdexcept>
 
 int main() {
     using namespace pause_policy;
@@ -185,38 +185,92 @@ int main() {
     assert(queued_code == 0x002A62D0u); // PAL vendor draw guest code
     assert(queued_moby == 0x654321u);
 
-    // The Swingshot cable is normally queued by its gameplay update, which
-    // must stay frozen while Quick Select is open. Only class 208 owns the
-    // cable; class 209 is its separate hook, not another cable renderer.
-    assert(should_route_swingshot_cable(true, true, true, 208));
-    assert(!should_route_swingshot_cable(false, true, true, 208));
-    assert(!should_route_swingshot_cable(true, false, true, 208));
-    assert(!should_route_swingshot_cable(true, true, false, 208));
-    assert(!should_route_swingshot_cable(true, true, true, 209));
-    assert(!should_route_swingshot_cable(true, true, true, 758));
-    assert(!needs_update_for_water(12, 208)); // Never release its full update.
+    // Health crates create a separate class-806 Nanotech orb. Its update
+    // can heal Ratchet, so draw the initialized orb without running it.
+    assert(should_route_nanotech_draw(true, true, true, true, 806));
+    assert(!should_route_nanotech_draw(false, true, true, true, 806));
+    assert(!should_route_nanotech_draw(true, false, true, true, 806));
+    assert(!should_route_nanotech_draw(true, true, false, true, 806));
+    assert(!should_route_nanotech_draw(true, true, true, false, 806));
+    assert(!should_route_nanotech_draw(true, true, true, true, 501));
+    assert(!needs_update_for_water(9, 806));
+    assert(can_draw_nanotech_orb(1, 0x1000u, 0x2000u, 501));
+    assert(can_draw_nanotech_orb(2, 0x1000u, 0x2000u, 501));
+    assert(!can_draw_nanotech_orb(0, 0x1000u, 0x2000u, 501));
+    assert(!can_draw_nanotech_orb(3, 0x1000u, 0x2000u, 501));
+    assert(!can_draw_nanotech_orb(4, 0x1000u, 0x2000u, 501));
+    assert(!can_draw_nanotech_orb(1, 0, 0x2000u, 501));
+    assert(!can_draw_nanotech_orb(1, 0x1000u, 0, 501));
+    assert(!can_draw_nanotech_orb(1, 0x1000u, 0x2000u, 502));
 
-    // Exact states where RAC1's Swingshot update registers the cable draw.
-    const std::uint8_t active_cable_states[] =
-        {2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14};
-    for (const auto state : active_cable_states) {
-        assert(can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 1));
-        assert(!can_draw_swingshot_cable(state, 0, 0x2000u, 209, 1));
-        assert(!can_draw_swingshot_cable(state, 0x1000u, 0, 209, 1));
-        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 208, 1));
-        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 0xFE));
-        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 0xFD));
-    }
-    for (const std::uint8_t state : {0, 1, 8, 15, 0xFD, 0xFE}) {
-        assert(!can_draw_swingshot_cable(state, 0x1000u, 0x2000u, 209, 1));
+    int nanotech_updates = 0;
+    int nanotech_draws = 0;
+    dispatch_nanotech_update(true, true,
+                             [&] { ++nanotech_updates; },
+                             [&] { ++nanotech_draws; });
+    assert(nanotech_updates == 0 && nanotech_draws == 1);
+    dispatch_nanotech_update(true, false,
+                             [&] { ++nanotech_updates; },
+                             [&] { ++nanotech_draws; });
+    assert(nanotech_updates == 0 && nanotech_draws == 1);
+    dispatch_nanotech_update(false, true,
+                             [&] { ++nanotech_updates; },
+                             [&] { ++nanotech_draws; });
+    assert(nanotech_updates == 1 && nanotech_draws == 1);
+    enqueue_nanotech_orb(false, 0x123456u, capture_guest_draw);
+    assert(queued_code == 0x002D9810u && queued_moby == 0x123456u);
+    enqueue_nanotech_orb(true, 0x654321u, capture_guest_draw);
+    assert(queued_code == 0x002DACC0u && queued_moby == 0x654321u);
+
+    // Class 803's yellow twin-target connection is replenished by its
+    // particle emitter; class 758 is not the paired yellow target.
+    assert(should_route_paired_swingshot_glow(true, true, true, true, 803, 1));
+    assert(!should_route_paired_swingshot_glow(false, true, true, true, 803, 1));
+    assert(!should_route_paired_swingshot_glow(true, false, true, true, 803, 1));
+    assert(!should_route_paired_swingshot_glow(true, true, false, true, 803, 1));
+    assert(!should_route_paired_swingshot_glow(true, true, true, false, 803, 1));
+    assert(!should_route_paired_swingshot_glow(true, true, true, true, 758, 1));
+    assert(!should_route_paired_swingshot_glow(true, true, true, true, 803, 0));
+    assert(!should_route_paired_swingshot_glow(true, true, true, true, 803, 2));
+    const auto pal_target_clock = paired_swingshot_motion_clock_addresses(true);
+    assert(pal_target_clock.frame_time == 0x0015EE6Cu);
+    assert(pal_target_clock.frame_time_squared == 0x0015EE70u);
+    const auto ntsc_target_clock = paired_swingshot_motion_clock_addresses(false);
+    assert(ntsc_target_clock.frame_time == 0x0015ED6Cu);
+    assert(ntsc_target_clock.frame_time_squared == 0x0015ED70u);
+    float target_time = 0.016f;
+    float target_time_sq = 0.000256f;
+    int target_emissions = 0;
+    with_stopped_motion_clocks(
+        [&] { return target_time; }, [&](float v) { target_time = v; },
+        [&] { return target_time_sq; }, [&](float v) { target_time_sq = v; },
+        [&] {
+            assert(target_time == 0.0f && target_time_sq == 0.0f);
+            ++target_emissions;
+        });
+    assert(target_emissions == 1);
+    assert(target_time == 0.016f && target_time_sq == 0.000256f);
+    float target_yaw = 0.75f;
+    float target_steering = 0.125f;
+    with_preserved_motion_pair(
+        [&] { return target_yaw; }, [&](float v) { target_yaw = v; },
+        [&] { return target_steering; }, [&](float v) { target_steering = v; },
+        [&] { target_yaw = 3.0f; target_steering = 1.0f; });
+    assert(target_yaw == 0.75f && target_steering == 0.125f);
+    try {
+        with_preserved_motion_pair(
+            [&] { return target_yaw; }, [&](float v) { target_yaw = v; },
+            [&] { return target_steering; }, [&](float v) { target_steering = v; },
+            [&] {
+                target_yaw = 4.0f;
+                target_steering = 2.0f;
+                throw std::runtime_error("test exception");
+            });
+        assert(false);
+    } catch (const std::runtime_error&) {
+        assert(target_yaw == 0.75f && target_steering == 0.125f);
     }
 
-    enqueue_swingshot_cable(false, 0x123456u, capture_guest_draw);
-    assert(queued_code == 0x002C5DC8u); // NTSC-U cable code, not a host pointer
-    assert(queued_moby == 0x123456u);
-    enqueue_swingshot_cable(true, 0x654321u, capture_guest_draw);
-    assert(queued_code == 0x002C7128u); // PAL cable code
-    assert(queued_moby == 0x654321u);
 
     const auto ntsc_vendor_phases = vendor_phase_addresses(false);
     assert(ntsc_vendor_phases.sparkle_uv == 0x00161394u);

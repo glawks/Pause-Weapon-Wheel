@@ -2,8 +2,8 @@
 
 **Version 1.0.1 — working release**
 
-> The `testing` branch may contain unreleased changes. Its Gadgetron vendor
-> and Swingshot cable visual-only fixes are experimental until verified in-game.
+> The `testing` branch may contain unreleased changes. Its Gadgetron vendor,
+> paired Swingshot target and Nanotech glow fixes are experimental until verified in-game.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -17,7 +17,8 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Quartu's electrical arcs visible.** A draw-only hook renders previously initialized electric-bolt geometry without running the controller's shock-damage and timer update.
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
 - **Keep Gadgetron vendor effects visible (testing).** Preserve the blue beam, lettering and glow while holding the vendor's ordinary state changes, rotations and texture phases still.
-- **Keep Swingshot cables visible (testing).** Requeue the grappling cable's existing draw callback when the wheel is open, without moving Ratchet, the Swingshot or its hook. Only an initialized cable in an active grapple state is drawn.
+- **Keep yellow paired Swingshot targets glowing (testing).** Replenish the particle stream connecting the two yellow spheres while temporarily stopping the target's motion clocks.
+- **Keep Nanotech crate glows visible (testing).** Draw the initialized glowing Nanotech spheres using the game's original draw callback without moving them or running health-collection logic.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
 - **Optional diagnostics.** Log observed moby classes and scenery exemptions when Quick Select closes.
 
@@ -87,7 +88,8 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - Additional game builds, PAL behaviour and macOS/Linux gameplay have not been verified. Scenery callbacks that were not encountered during testing may need additional exemptions.
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
 - The `testing` branch's vendor visual-only callback and frozen glow phases still need in-game verification on NTSC-U and PAL.
-- The `testing` branch's Swingshot cable rendering is also unverified in-game; it targets the cable from Ratchet's equipped Swingshot to its hook during an active grapple, not unrelated beams or effects between level props.
+- The `testing` branch's yellow paired Swingshot target fix is still unverified. Its connection consists of short-lived particles, which may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
+- The Nanotech crate glow fix keeps the main sphere drawn without running its health-collection update. Additional sparkle particles may still fade while paused; in-game testing will show if they need separate handling.
 
 ## Technical notes
 
@@ -97,7 +99,9 @@ Most water/scenery surfaces register a **draw callback each frame** from a moby 
 
 Quartu's electric-bolt callback uses the game's **32-bit code address**, rather than a native function pointer: `0x002D8710` on NTSC-U and `0x002D9B00` on PAL. The normal electric-water update—which can damage Ratchet—remains blocked during Quick Select.
 
-The Swingshot (class `208`) registers a separate cable draw callback while grappling. Its game update, and its hook's class `209` update, are still skipped. Only live hook objects owned by that Swingshot can enqueue the callback (`0x002C5DC8` NTSC-U / `0x002C7128` PAL).
+Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow draw callback is `0x002D9810` (NTSC-U) or `0x002DACC0` (PAL). Its normal gameplay update stays frozen, even when the glow is drawn.
+
+Yellow paired Swingshot targets are class `803`. Their state-1 update emits the connection's particles rather than registering a dedicated draw callback. The experimental hook runs that update with its two movement clocks temporarily zeroed; class `758` targets remain frozen as before.
 
 Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
 

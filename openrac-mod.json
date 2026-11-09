@@ -17,7 +17,9 @@
     "rac1.player.update",
     "rac1.hud.quick_select.update",
     "rac1.moby.moby1901.update",
-    "rac1.moby.light_beam.update"
+    "rac1.moby.light_beam.update",
+    "rac1.moby.nanotech_ball.update",
+    "rac1.moby.hideable_flower.update"
   ],
   "settings": [
     {
@@ -32,7 +34,7 @@
       "name": "Keep water and scenery drawing",
       "type": "bool",
       "default": true,
-      "description": "Let known visual-effect controllers run each frame to draw water, mud, ship glass and other scenery effects."
+      "description": "Preserve water, mud, ship glass and visual-only effects such as vendor glow, Nanotech orbs and paired Swingshot target particles."
     },
     {
       "key": "hold_hoven_scroll",

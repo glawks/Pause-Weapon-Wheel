@@ -24,7 +24,9 @@ constexpr openrac::gaddr kMobyState = 0x20u;
 constexpr openrac::gaddr kMobyPvars = 0x78u;
 constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
 constexpr openrac::gaddr kVendorRingPtr = 0x0Cu;
-constexpr openrac::gaddr kSwingshotHookPtr = 0x14u;
+constexpr openrac::gaddr kNanotechOwnerPtr = 0x0Cu;
+constexpr openrac::gaddr kMobyYaw = 0x48u;
+constexpr openrac::gaddr kPairedTargetSteeringVelocity = 0x38u;
 
 // Game-code addresses from the RAC1 PAL and NTSC-U decompilations. Both
 // callbacks are resolved for the current loaded level; nothing is patched in
@@ -56,8 +58,12 @@ bool quartu_electric_missing_draw_warned = false;
 bool vendor_draw_hook = false;
 bool vendor_first_draw_logged = false;
 bool vendor_missing_draw_warned = false;
-bool swingshot_first_draw_logged = false;
-bool swingshot_missing_draw_warned = false;
+bool nanotech_draw_hook = false;
+bool nanotech_first_draw_logged = false;
+bool nanotech_missing_draw_warned = false;
+bool paired_target_effect_hook = false;
+bool paired_target_first_effect_logged = false;
+bool paired_target_missing_clocks_warned = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
 bool freeze_animations = true;
 bool keep_water = true;
@@ -141,6 +147,12 @@ openrac::gaddr moby_at(int slot, openrac::gaddr array_base) {
     return array_base + static_cast<openrac::gaddr>(slot) * kMobySize;
 }
 
+bool is_moby_in_active_array(openrac::gaddr address, openrac::gaddr array_base) {
+    return array_base != 0 && address >= array_base
+           && (address - array_base) % kMobySize == 0
+           && (address - array_base) / kMobySize < 32768;
+}
+
 void stop_animation(openrac::gaddr moby, openrac::gaddr array_base, int level,
                     std::int16_t oclass) {
     auto memory = game_mod->memory();
@@ -179,62 +191,6 @@ void restore_animations() {
     flagged_mobys.clear();
 }
 
-// Swingshot's regular update queues this render in states 2-7 and 9-14, but
-// also advances the grapple cable and hero movement. The hook object itself
-// is class 209. Draw the already-initialized cable with neither update run.
-void enqueue_paused_swingshot_cable(openrac::gaddr moby,
-                                    openrac::gaddr array_base) {
-    auto memory = game_mod->memory();
-    const auto state = memory.read<std::uint8_t>(moby + kMobyState);
-    if ((state < 2 || state > 7) && (state < 9 || state > 14)) {
-        return;
-    }
-
-    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
-    if (pvars == 0) {
-        return;
-    }
-    const auto hook = memory.read<std::uint32_t>(pvars + kSwingshotHookPtr);
-    // Verify the saved hook still points into this level's active moby array
-    // before touching its fields. Swingshot may be initialized or torn down
-    // during transitions, so a stale pointer must never be rendered.
-    if (hook < array_base || (hook - array_base) % kMobySize != 0
-        || (hook - array_base) / kMobySize >= 32768) {
-        return;
-    }
-    const auto hook_class = memory.read<std::int16_t>(hook + kMobyClass);
-    const auto hook_state = memory.read<std::uint8_t>(hook + kMobyState);
-    if (!pause_policy::can_draw_swingshot_cable(
-            state, pvars, hook, hook_class, hook_state)) {
-        return;
-    }
-    // The hook pvars stores its owner at offset zero. A reused hook slot
-    // must not accidentally connect the cable to another object.
-    const auto hook_pvars = memory.read<std::uint32_t>(hook + kMobyPvars);
-    if (hook_pvars == 0 || memory.read<std::uint32_t>(hook_pvars) != moby) {
-        return;
-    }
-
-    const bool pal = game_mod->version() == "pal";
-    const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
-        pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
-    const auto draw = game_mod->function_at<GameDrawEffectFn>(
-        pause_policy::swingshot_cable_code_address(pal));
-    if (add == nullptr || draw == nullptr) {
-        if (!swingshot_missing_draw_warned) {
-            game_mod->warn("Swingshot cable draw unavailable; grapple movement remains paused");
-            swingshot_missing_draw_warned = true;
-        }
-        return;
-    }
-
-    pause_policy::enqueue_swingshot_cable(pal, moby, add);
-    if (!swingshot_first_draw_logged) {
-        game_mod->info("Swingshot cable visual-only draw enqueued while gameplay is paused");
-        swingshot_first_draw_logged = true;
-    }
-}
-
 int gate_moby_update(void*, int slot, int phase) {
     if (phase != OPENRAC_MOBY_BEFORE || !wheel_active) {
         return 0;
@@ -257,35 +213,29 @@ int gate_moby_update(void*, int slot, int phase) {
         }
         observed_classes.insert(oclass);
     }
-    if (pause_policy::should_route_swingshot_cable(
-            wheel_active, keep_water, world_gate, oclass)) {
-        // Keep both the held Swingshot model and the hook animation still,
-        // even when the optional general animation freeze is disabled.
-        stop_animation(moby, array_base, level, oclass);
-        enqueue_paused_swingshot_cable(moby, array_base);
-        return 1; // Always skip the grapple/gameplay update.
-    }
-    if (wheel_active && keep_water && world_gate && oclass == 209) {
-        stop_animation(moby, array_base, level, oclass);
-        return 1; // The hook's own update must stay paused too.
-    }
+    const auto state = oclass == 803
+        ? game_mod->memory().read<std::uint8_t>(moby + kMobyState) : 0u;
+    const bool nanotech_draw_only = pause_policy::should_route_nanotech_draw(
+        wheel_active, keep_water, world_gate, nanotech_draw_hook, oclass);
+    const bool paired_target_effects = pause_policy::should_route_paired_swingshot_glow(
+        wheel_active, keep_water, world_gate, paired_target_effect_hook, oclass, state);
     const bool vendor_draw_only = pause_policy::should_route_vendor_draw(
         wheel_active, keep_water, world_gate, vendor_draw_hook, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
                        || vendor_draw_only
+                       || nanotech_draw_only || paired_target_effects
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
         if (diagnostic_log) {
             exempted_classes.insert(oclass);
         }
-        // Class 655 is intercepted by the draw-only hook below; it never
-        // reaches its original damaging update during Quick Select.
-        if (vendor_draw_only) {
-            // The vendor's ordinary update is skipped, but its visible
-            // animation can still be advanced earlier in the moby loop.
-            // Always freeze it while its visuals are kept, even when the
-            // separate "freeze enemy animations" option is disabled.
+        // Class 655 and the class-806 health orb use draw-only hooks.
+        // Class 803 instead runs just enough of its effect update to emit
+        // the yellow link particles with its motion clocks stopped.
+        if (vendor_draw_only || nanotech_draw_only || paired_target_effects) {
+            // The visible moby animation can advance earlier in the game
+            // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
         }
         return 0;
@@ -319,8 +269,12 @@ void load(openrac::Mod& mod) {
     vendor_draw_hook = false;
     vendor_first_draw_logged = false;
     vendor_missing_draw_warned = false;
-    swingshot_first_draw_logged = false;
-    swingshot_missing_draw_warned = false;
+    nanotech_draw_hook = false;
+    nanotech_first_draw_logged = false;
+    nanotech_missing_draw_warned = false;
+    paired_target_effect_hook = false;
+    paired_target_first_effect_logged = false;
+    paired_target_missing_clocks_warned = false;
     vendor_phases.reset();
     flagged_mobys.clear();
     observed_level = -1;
@@ -488,6 +442,125 @@ void load(openrac::Mod& mod) {
         mod.info("Gadgetron vendor draw-only hook registered (class 11)");
     } catch (const openrac::Error&) {
         mod.warn("Gadgetron class 11 hook unavailable; vendor visuals remain paused");
+    }
+
+    // Nanotech boxes (501) create a class-806 visual orb. Its update also
+    // tracks/collects health, moves particles and can change Ratchet's HP.
+    // Draw the existing glow only, retaining the orb's held position and
+    // pulse phase instead of running those gameplay changes.
+    try {
+        mod.hook<openrac::rac1::Moby_NanotechBall_Update>(
+            [](auto original, std::uint32_t moby) {
+                const bool draw_only = pause_policy::should_route_nanotech_draw(
+                    wheel_active, keep_water, world_gate, nanotech_draw_hook, 806);
+                bool drawable = false;
+                if (draw_only && moby != 0) {
+                    auto memory = game_mod->memory();
+                    const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                    const auto owner = pvars == 0 ? 0u
+                        : memory.read<std::uint32_t>(pvars + kNanotechOwnerPtr);
+                    const auto array_base = current_moby_array();
+                    if (is_moby_in_active_array(owner, array_base)) {
+                        const auto owner_class = memory.read<std::int16_t>(owner + kMobyClass);
+                        drawable = pause_policy::can_draw_nanotech_orb(
+                            state, pvars, owner, owner_class);
+                    }
+                }
+
+                pause_policy::dispatch_nanotech_update(
+                    draw_only, drawable,
+                    [&] { original(moby); },
+                    [&] {
+                        const bool pal = game_mod->version() == "pal";
+                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::nanotech_orb_code_address(pal));
+                        if (add == nullptr || draw == nullptr) {
+                            if (!nanotech_missing_draw_warned) {
+                                game_mod->warn("Nanotech glow draw unavailable; health pickup remains paused");
+                                nanotech_missing_draw_warned = true;
+                            }
+                            return;
+                        }
+                        pause_policy::enqueue_nanotech_orb(pal, moby, add);
+                        if (!nanotech_first_draw_logged) {
+                            game_mod->info("Nanotech orb visual-only draw enqueued during Quick Select");
+                            nanotech_first_draw_logged = true;
+                        }
+                    });
+            });
+        nanotech_draw_hook = true;
+        mod.info("Nanotech orb draw-only hook registered (class 806)");
+    } catch (const openrac::Error&) {
+        mod.warn("Nanotech orb hook unavailable; health boxes stay paused without glow");
+    }
+
+    // A paired yellow Swingshot target is a class-803 moby whose state-1
+    // update replenishes the glowing particle connection. It has no separate
+    // draw callback. Allow only that update under zero movement clocks so
+    // the target cannot steer toward Ratchet while the wheel is open.
+    // Existing free particles may still move/fade; in-game testing is needed.
+    try {
+        mod.hook<openrac::rac1::Moby_SwingshotVersatarget_Update>(
+            [](auto original, std::uint32_t moby) {
+                if (moby == 0) {
+                    original(moby);
+                    return;
+                }
+                const auto memory = game_mod->memory();
+                const auto oclass = memory.read<std::int16_t>(moby + kMobyClass);
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const bool preserve_glow = pause_policy::should_route_paired_swingshot_glow(
+                    wheel_active, keep_water, world_gate, paired_target_effect_hook,
+                    oclass, state);
+                if (!preserve_glow) {
+                    original(moby);
+                    return;
+                }
+
+                const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                if (pvars == 0) {
+                    return; // A target in state 1 should always be initialized.
+                }
+
+                const auto clocks = pause_policy::paired_swingshot_motion_clock_addresses(
+                    game_mod->version() == "pal");
+                const auto time_addr = game_mod->relocate(clocks.frame_time);
+                const auto sq_addr = game_mod->relocate(clocks.frame_time_squared);
+                if (time_addr == 0 || sq_addr == 0) {
+                    if (!paired_target_missing_clocks_warned) {
+                        game_mod->warn("Paired Swingshot motion clocks unavailable; target stays frozen without particles");
+                        paired_target_missing_clocks_warned = true;
+                    }
+                    return;
+                }
+                auto clock_memory = game_mod->memory();
+                pause_policy::with_preserved_motion_pair(
+                    [&] { return clock_memory.read<float>(moby + kMobyYaw); },
+                    [&](float value) { clock_memory.write<float>(moby + kMobyYaw, value); },
+                    [&] { return clock_memory.read<float>(pvars + kPairedTargetSteeringVelocity); },
+                    [&](float value) {
+                        clock_memory.write<float>(pvars + kPairedTargetSteeringVelocity, value);
+                    },
+                    [&] {
+                        pause_policy::with_stopped_motion_clocks(
+                            [&] { return clock_memory.read<float>(time_addr); },
+                            [&](float value) { clock_memory.write<float>(time_addr, value); },
+                            [&] { return clock_memory.read<float>(sq_addr); },
+                            [&](float value) { clock_memory.write<float>(sq_addr, value); },
+                            [&] { original(moby); });
+                    });
+                if (!paired_target_first_effect_logged) {
+                    game_mod->info("Paired Swingshot glow particle update held at zero motion time");
+                    paired_target_first_effect_logged = true;
+                }
+            });
+        paired_target_effect_hook = true;
+        mod.info("Paired Swingshot yellow-glow hook registered (class 803)");
+    } catch (const openrac::Error&) {
+        mod.warn("Paired Swingshot hook unavailable; yellow target particles remain paused");
     }
 
     try {

@@ -135,38 +135,67 @@ void enqueue_vendor_effects(bool pal, std::uint32_t moby, Enqueue enqueue) {
     enqueue(vendor_effect_code_address(pal), moby);
 }
 
-// The held Swingshot (class 208) normally submits its cable draw from its
-// gameplay update. That update also moves the grappling hook and changes
-// grapple/hero states, so it must remain gated throughout Quick Select.
-// Submit the cable render callback directly from the moby gate instead.
-constexpr bool should_route_swingshot_cable(bool wheel_active, bool keep_scenery,
-                                            bool world_gate, int oclass) {
-    return wheel_active && keep_scenery && world_gate && oclass == 208;
+// A Nanotech crate (501) owns a separate glowing orb moby (806). The orb's
+// full update follows the crate and can collect health, so never allow the
+// original gameplay update just to preserve its visual draw callback.
+constexpr bool should_route_nanotech_draw(bool wheel_active, bool keep_scenery,
+                                         bool world_gate, bool draw_hook_installed,
+                                         int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && oclass == 806;
 }
 
-// Only states that enqueue draw_swingshot_cable in the retail update. The
-// cable renderer dereferences the hook pointer in pvars+0x14; never call it
-// for an uninitialized hook or one whose moby was deleted/reused.
-constexpr bool can_draw_swingshot_cable(std::uint8_t state, std::uint32_t pvars,
-                                       std::uint32_t hook, int hook_oclass,
-                                       std::uint8_t hook_state) {
-    const bool cable_active = (state >= 2 && state <= 7)
-                              || (state >= 9 && state <= 14);
-    return cable_active && pvars != 0 && hook != 0 && hook_oclass == 209
-           && hook_state != 0xFD && hook_state != 0xFE;
+// State 0 is uninitialized; states 3/4 are collecting/finished. The draw
+// renderer reads the owner matrix even after the crate breaks (state 2).
+constexpr bool can_draw_nanotech_orb(std::uint8_t state, std::uint32_t pvars,
+                                    std::uint32_t owner, int owner_oclass) {
+    return (state == 1 || state == 2) && pvars != 0 && owner != 0
+           && owner_oclass == 501;
 }
 
-// Original guest addresses: PAL from RAC1 decomp func_L00_002C7128;
-// NTSC-U from the counterpart in Lombyte's disassembly (0x002C5DC8).
-// AddDrawCallback's list stores *guest addresses*, not native pointers.
-constexpr std::uint32_t swingshot_cable_code_address(bool pal) {
-    return pal ? 0x002C7128u : 0x002C5DC8u;
+template <typename Original, typename Draw>
+void dispatch_nanotech_update(bool draw_only, bool drawable,
+                              Original original, Draw draw) {
+    if (!draw_only) {
+        original();
+    } else if (drawable) {
+        draw();
+    }
+}
+
+// Original Nanotech glow sphere renderer. PAL: func_L00_002DACC0;
+// NTSC-U: FUN_L00_002D9810 from OpenRAC's carried source.
+constexpr std::uint32_t nanotech_orb_code_address(bool pal) {
+    return pal ? 0x002DACC0u : 0x002D9810u;
 }
 
 template <typename Enqueue>
-void enqueue_swingshot_cable(bool pal, std::uint32_t moby, Enqueue enqueue) {
-    enqueue(swingshot_cable_code_address(pal), moby);
+void enqueue_nanotech_orb(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(nanotech_orb_code_address(pal), moby);
 }
+
+// Two yellow Swingshot spheres are one class-803 target. Its state-1 update
+// emits short-lived particles that form the glowing connection, but also
+// steers the targets to face Ratchet. Keep it rendering with zero motion
+// clocks; other states/classes remain subject to the world pause gate.
+constexpr bool should_route_paired_swingshot_glow(bool wheel_active,
+                                                  bool keep_scenery, bool world_gate,
+                                                  bool effect_hook_installed,
+                                                  int oclass, std::uint8_t state) {
+    return wheel_active && keep_scenery && world_gate && effect_hook_installed
+           && oclass == 803 && state == 1;
+}
+
+struct PairedSwingshotClocks {
+    std::uint32_t frame_time;
+    std::uint32_t frame_time_squared;
+};
+
+constexpr PairedSwingshotClocks paired_swingshot_motion_clock_addresses(bool pal) {
+    return pal ? PairedSwingshotClocks{0x0015EE6Cu, 0x0015EE70u}
+               : PairedSwingshotClocks{0x0015ED6Cu, 0x0015ED70u};
+}
+
 
 struct VendorPhaseAddresses {
     std::uint32_t sparkle_uv;
@@ -230,6 +259,38 @@ void with_stopped_frame_time(ReadTime read_time, WriteTime write_time, Update up
         throw;
     }
     write_time(saved);
+}
+
+// Restore both clocks even on errors. The zeroes are scoped to exactly one
+// target update, leaving other game subsystems' timing unaffected.
+template <typename ReadTime, typename WriteTime, typename ReadSquared,
+          typename WriteSquared, typename Update>
+void with_stopped_motion_clocks(ReadTime read_time, WriteTime write_time,
+                                ReadSquared read_squared, WriteSquared write_squared,
+                                Update update) {
+    with_stopped_frame_time(read_time, write_time, [&] {
+        with_stopped_frame_time(read_squared, write_squared, update);
+    });
+}
+
+// Freeze the paired target's yaw and steering inertia even if the retail
+// steering helper modifies them while particle effects are replenished.
+template <typename ReadYaw, typename WriteYaw, typename ReadSteer,
+          typename WriteSteer, typename Update>
+void with_preserved_motion_pair(ReadYaw read_yaw, WriteYaw write_yaw,
+                                ReadSteer read_steer, WriteSteer write_steer,
+                                Update update) {
+    const float yaw = read_yaw();
+    const float steering = read_steer();
+    try {
+        update();
+    } catch (...) {
+        write_yaw(yaw);
+        write_steer(steering);
+        throw;
+    }
+    write_yaw(yaw);
+    write_steer(steering);
 }
 
 constexpr std::uint16_t with_animation_stopped(std::uint16_t flags) {
