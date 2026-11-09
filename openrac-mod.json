@@ -2,7 +2,7 @@
   "format": 2,
   "id": "pause-weapon-wheel",
   "name": "Weapon Wheel Pause",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "glawks",
   "description": "Pause RAC1 during Quick Select while preserving water, scenery and visual effects, with animation freezing and configurable background shading.",
   "license": "MIT",
