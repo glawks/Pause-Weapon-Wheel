@@ -175,6 +175,61 @@ void dispatch_vendor_update(bool draw_only, bool drawable, Original original, Dr
     }
 }
 
+// The real vendor update sets up ring geometry as well as submitting its
+// draw. Reuse that setup in its non-interactive state-1 branch while paused.
+// Its only transition out of state 1 is a proximity test every eight ticks;
+// make the frame count non-multiple-of-eight for this one call, and restore
+// the real state/counter immediately afterward. State 2's shop input checks
+// are never reached. State 1 subtracts 0.1 from the ring glow: seed it at
+// 1.1 so that the renderer still observes full strength (1.0).
+template <typename ReadState, typename WriteState, typename ReadFrame,
+          typename WriteFrame, typename WriteGlow, typename Update>
+void with_vendor_visual_state(ReadState read_state, WriteState write_state,
+                              ReadFrame read_frame, WriteFrame write_frame,
+                              WriteGlow write_glow, Update update) {
+    const std::uint8_t original_state = read_state();
+    const std::uint32_t original_frame = read_frame();
+    write_state(1u);
+    write_frame(original_frame | 1u);
+    write_glow(1.1f);
+    try {
+        update();
+    } catch (...) {
+        write_frame(original_frame);
+        write_state(original_state);
+        write_glow(1.0f);
+        throw;
+    }
+    write_frame(original_frame);
+    write_state(original_state);
+    write_glow(1.0f);
+}
+
+// vendor_update writes two 4-float ring quaternions even with motion clocks
+// stopped. Put their original values back and rebuild the cached ring pose;
+// this keeps the letters stationary while the original update draws the beam.
+template <typename Read, typename Write, typename Update, typename Rebuild>
+void with_vendor_ring_rotations_held(Read read, Write write,
+                                     Update update, Rebuild rebuild) {
+    float saved[8]{};
+    for (int i = 0; i < 8; ++i) {
+        saved[i] = read(i);
+    }
+    const auto restore = [&] {
+        for (int i = 0; i < 8; ++i) {
+            write(i, saved[i]);
+        }
+        rebuild();
+    };
+    try {
+        update();
+    } catch (...) {
+        restore();
+        throw;
+    }
+    restore();
+}
+
 // These are guest code addresses of draw_vendor_effects, not native host
 // pointers. NTSC-U's counterpart is verified in OpenRAC's carried source.
 constexpr std::uint32_t vendor_effect_code_address(bool pal) {

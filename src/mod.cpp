@@ -25,6 +25,15 @@ constexpr openrac::gaddr kMobyPvars = 0x78u;
 constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
 constexpr openrac::gaddr kVendorRingPtr = 0x0Cu;
 constexpr openrac::gaddr kVendorGlowStrength = 0x90u;
+constexpr openrac::gaddr kVendorRingAQuaternion = 0x20u;
+constexpr openrac::gaddr kVendorRingBQuaternion = 0x60u;
+// Shared-level frame count. Forcing a non-multiple of eight in the scoped
+// visual update keeps the original vendor's proximity branch inactive.
+constexpr openrac::gaddr kPalLevelFrameCounter = 0x0015F6B0u;
+constexpr openrac::gaddr kNtscLevelFrameCounter = 0x0015F5CCu;
+// Game moby matrix builder (OpenRAC RAC1 decomp version maps, shared level).
+constexpr openrac::gaddr kPalBuildMobyMatrix = 0x00250A08u;
+constexpr openrac::gaddr kNtscBuildMobyMatrix = 0x00250DF8u;
 constexpr openrac::gaddr kNanotechOwnerPtr = 0x0Cu;
 constexpr openrac::gaddr kNanotechBobOffset = 0x00u;
 constexpr openrac::gaddr kNanotechBobPhase = 0x04u;
@@ -41,6 +50,7 @@ constexpr openrac::gaddr kNtscAddDrawCallback = 0x001F4600u;
 // The game's callback queue takes two 32-bit guest addresses, not host pointers.
 using GameDrawEffectFn = void (*)(void*);
 using GameAddDrawCallbackFn = void (*)(std::uint32_t, std::uint32_t);
+using GameBuildMobyMatrixFn = void (*)(std::uint32_t);
 
 struct FrozenAnimation {
     int level;
@@ -61,6 +71,7 @@ bool quartu_electric_missing_draw_warned = false;
 bool vendor_draw_hook = false;
 bool vendor_first_draw_logged = false;
 bool vendor_missing_draw_warned = false;
+bool vendor_first_original_refresh_logged = false;
 bool nanotech_draw_hook = false;
 bool nanotech_first_draw_logged = false;
 bool nanotech_missing_draw_warned = false;
@@ -89,6 +100,7 @@ int observed_level = -1;
 std::set<int> observed_classes;
 std::set<int> exempted_classes;
 int vendor_visual_draw_count = 0;
+int vendor_original_refresh_count = 0;
 int nanotech_attached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
 
@@ -115,6 +127,8 @@ void report_pause_diagnostics() {
         log_class_list("exempted", exempted_classes);
         game_mod->info("pause diagnostic visual updates: vendor_draw="
                        + std::to_string(vendor_visual_draw_count)
+                       + ", vendor_original_refresh="
+                       + std::to_string(vendor_original_refresh_count)
                        + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
                        + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count));
     }
@@ -122,6 +136,7 @@ void report_pause_diagnostics() {
     observed_classes.clear();
     exempted_classes.clear();
     vendor_visual_draw_count = 0;
+    vendor_original_refresh_count = 0;
     nanotech_attached_glow_count = 0;
     nanotech_visual_draw_count = 0;
 }
@@ -285,6 +300,7 @@ void load(openrac::Mod& mod) {
     vendor_draw_hook = false;
     vendor_first_draw_logged = false;
     vendor_missing_draw_warned = false;
+    vendor_first_original_refresh_logged = false;
     nanotech_draw_hook = false;
     nanotech_first_draw_logged = false;
     nanotech_missing_draw_warned = false;
@@ -402,14 +418,13 @@ void load(openrac::Mod& mod) {
         mod.warn("Quartu class 655 hook unavailable; electric bolts remain paused");
     }
 
-    // Class 11 is the Gadgetron vendor on every planet. Its normal update
-    // draws the blue beam/letters but also pulses the glow, rotates the ring,
-    // checks proximity and can open the vendor menu. Keep all of that logic
-    // paused and only enqueue its already-initialized visual draw function.
-    // The beam renderer also reads a proximity-controlled glow strength from
-    // the vendor's pvars: hold it at full brightness and restore it on exit.
-    // Unlike Hoven's water, zero frame time is insufficient: the renderer
-    // increments its animation phases by fixed amounts.
+    // Class 11's visual update not only queues the beam: it also refreshes
+    // the vendor ring's cached matrices. Hand-queuing its draw did not keep
+    // the beam visible in-game. Reuse the original state-1 visual setup,
+    // forcing a non-proximity frame tick so it cannot enter state 2 or the
+    // shop menu. Restore the real state, frame counter and ring rotations
+    // immediately, and keep its glow at full strength until Quick Select
+    // closes. Class 1143's separate orb motion remains paused by the gate.
     try {
         mod.hook<openrac::rac1::Moby_Vendor_Update>(
             [](auto original, std::uint32_t moby) {
@@ -417,11 +432,12 @@ void load(openrac::Mod& mod) {
                     wheel_active, keep_water, world_gate, vendor_draw_hook, 11);
                 bool drawable = false;
                 std::uint32_t pvars = 0;
+                std::uint32_t ring = 0;
                 if (draw_only && moby != 0) {
                     auto memory = game_mod->memory();
                     const auto state = memory.read<std::uint8_t>(moby + kMobyState);
                     pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
-                    const auto ring = pvars == 0 ? 0u
+                    ring = pvars == 0 ? 0u
                         : memory.read<std::uint32_t>(pvars + kVendorRingPtr);
                     const auto array_base = current_moby_array();
                     drawable = pause_policy::can_draw_vendor_effects(state, pvars, ring)
@@ -435,17 +451,12 @@ void load(openrac::Mod& mod) {
                     [&] { original(moby); },
                     [&] {
                         const bool pal = game_mod->version() == "pal";
-                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
-                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
-                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
-                            pause_policy::vendor_effect_code_address(pal));
                         const auto phase_addresses = pause_policy::vendor_phase_addresses(pal);
                         const auto sparkle_address = game_mod->relocate(phase_addresses.sparkle_uv);
                         const auto glow_address = game_mod->relocate(phase_addresses.glow);
-                        if (add == nullptr || draw == nullptr
-                            || sparkle_address == 0 || glow_address == 0) {
+                        if (sparkle_address == 0 || glow_address == 0) {
                             if (!vendor_missing_draw_warned) {
-                                game_mod->warn("Gadgetron visual-only draw unavailable; vendor gameplay stays paused");
+                                game_mod->warn("Gadgetron glow globals unavailable; gameplay stays paused");
                                 vendor_missing_draw_warned = true;
                             }
                             return;
@@ -460,22 +471,81 @@ void load(openrac::Mod& mod) {
                             game_mod->loaded_level(), current_moby_array(), moby,
                             memory.read<std::uint64_t>(moby + kMobySpawnFrame),
                             pvars, memory.read<float>(pvars + kVendorGlowStrength));
-                        // The queued renderer reads these values later this
-                        // frame, so they must stay in guest memory until draw.
-                        memory.write<float>(pvars + kVendorGlowStrength, 1.0f);
                         memory.write<float>(glow_address,
                             pause_policy::vendor_full_glow_alpha_phase());
-                        // The callback list stores the 32-bit guest address.
+
+                        const auto counter_address = game_mod->relocate(
+                            pal ? kPalLevelFrameCounter : kNtscLevelFrameCounter);
+                        const auto rebuild = game_mod->function_at<GameBuildMobyMatrixFn>(
+                            pal ? kPalBuildMobyMatrix : kNtscBuildMobyMatrix);
+                        if (counter_address != 0 && rebuild != nullptr) {
+                            // The original state-1 path queues the real draw
+                            // and refreshes its matrix. Its state-2 shop
+                            // interaction path is never executed here.
+                            pause_policy::with_vendor_visual_state(
+                                [&] { return memory.read<std::uint8_t>(moby + kMobyState); },
+                                [&](std::uint8_t v) {
+                                    memory.write<std::uint8_t>(moby + kMobyState, v);
+                                },
+                                [&] { return memory.read<std::uint32_t>(counter_address); },
+                                [&](std::uint32_t v) {
+                                    memory.write<std::uint32_t>(counter_address, v);
+                                },
+                                [&](float v) {
+                                    memory.write<float>(pvars + kVendorGlowStrength, v);
+                                },
+                                [&] {
+                                    pause_policy::with_vendor_ring_rotations_held(
+                                        [&](int i) {
+                                            const auto offset = i < 4
+                                                ? kVendorRingAQuaternion + static_cast<std::uint32_t>(i) * 4u
+                                                : kVendorRingBQuaternion
+                                                    + static_cast<std::uint32_t>(i - 4) * 4u;
+                                            return memory.read<float>(pvars + offset);
+                                        },
+                                        [&](int i, float v) {
+                                            const auto offset = i < 4
+                                                ? kVendorRingAQuaternion + static_cast<std::uint32_t>(i) * 4u
+                                                : kVendorRingBQuaternion
+                                                    + static_cast<std::uint32_t>(i - 4) * 4u;
+                                            memory.write<float>(pvars + offset, v);
+                                        },
+                                        [&] { original(moby); },
+                                        [&] { rebuild(ring); });
+                                });
+                            ++vendor_original_refresh_count;
+                            if (!vendor_first_original_refresh_logged) {
+                                game_mod->info("Gadgetron original beam refreshed with shop input/state blocked and ring pose held");
+                                vendor_first_original_refresh_logged = true;
+                            }
+                            return;
+                        }
+
+                        // Older ports may not expose the matrix builder.
+                        // Keep gameplay paused rather than run the original
+                        // update without its motion-restoration guard.
+                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::vendor_effect_code_address(pal));
+                        if (add == nullptr || draw == nullptr) {
+                            if (!vendor_missing_draw_warned) {
+                                game_mod->warn("Gadgetron matrix rebuild unavailable; fallback draw unavailable too");
+                                vendor_missing_draw_warned = true;
+                            }
+                            return;
+                        }
+                        memory.write<float>(pvars + kVendorGlowStrength, 1.0f);
                         pause_policy::enqueue_vendor_effects(pal, moby, add);
                         ++vendor_visual_draw_count;
                         if (!vendor_first_draw_logged) {
-                            game_mod->info("Gadgetron vendor bright stationary beam/letters draw enqueued");
+                            game_mod->warn("Gadgetron using manual draw fallback; visual refresh unavailable on this port");
                             vendor_first_draw_logged = true;
                         }
                     });
             });
         vendor_draw_hook = true;
-        mod.info("Gadgetron vendor draw-only hook registered (class 11)");
+        mod.info("Gadgetron guarded original-visual hook registered (class 11)");
     } catch (const openrac::Error&) {
         mod.warn("Gadgetron class 11 hook unavailable; vendor visuals remain paused");
     }

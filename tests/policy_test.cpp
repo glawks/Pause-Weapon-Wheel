@@ -180,6 +180,47 @@ int main() {
     vendor_brightness.reset();
     assert(!vendor_brightness.active);
 
+    // The original vendor update is needed to keep its beam's render state
+    // alive, but state 2 can open the shop. During a paused visual refresh,
+    // it must see state 1 and a frame counter that skips proximity checks.
+    std::uint8_t live_vendor_state = 2;
+    std::uint32_t vendor_frame_counter = 16;
+    float live_vendor_glow = 0.7f;
+    int original_vendor_visual_updates = 0;
+    with_vendor_visual_state(
+        [&] { return live_vendor_state; },
+        [&](std::uint8_t v) { live_vendor_state = v; },
+        [&] { return vendor_frame_counter; },
+        [&](std::uint32_t v) { vendor_frame_counter = v; },
+        [&](float v) { live_vendor_glow = v; },
+        [&] {
+            assert(live_vendor_state == 1);
+            assert((vendor_frame_counter & 7u) != 0u);
+            assert(live_vendor_glow == 1.1f);
+            live_vendor_glow -= 0.1f; // Retail state-1 update.
+            ++original_vendor_visual_updates;
+        });
+    assert(original_vendor_visual_updates == 1);
+    assert(live_vendor_state == 2 && vendor_frame_counter == 16);
+    assert(live_vendor_glow == 1.0f);
+
+    // The vendor's original update also rotates the two ring manipulators
+    // by a fixed amount even with zero frame time. Restore all eight
+    // quaternion components and rebuild its matrix after refreshing visuals.
+    float vendor_ring_quats[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    int vendor_matrix_rebuilds = 0;
+    with_vendor_ring_rotations_held(
+        [&](int i) { return vendor_ring_quats[i]; },
+        [&](int i, float v) { vendor_ring_quats[i] = v; },
+        [&] {
+            for (float& v : vendor_ring_quats) v = 99.0f;
+        },
+        [&] { ++vendor_matrix_rebuilds; });
+    for (int i = 0; i < 8; ++i) {
+        assert(vendor_ring_quats[i] == static_cast<float>(i + 1));
+    }
+    assert(vendor_matrix_rebuilds == 1);
+
     int vendor_updates = 0;
     int vendor_draws = 0;
     dispatch_vendor_update(true, true,
