@@ -72,6 +72,34 @@ constexpr bool should_route_kalebo_wall_ribbons(bool wheel_active,
            && level == 16 && oclass == 552 && state == 1 && (flags & 0x2u) == 0;
 }
 
+// Drek's Fleet (Veldin Orbit) class 99 creates red scanning beams. Its normal
+// update both registers draw_fleet_beam_quad and performs collision/hit tests,
+// so exempt it only when a draw-only hook can bypass the gameplay update.
+constexpr bool should_route_fleet_laser_draw(bool wheel_active,
+                                            bool keep_scenery, bool world_gate,
+                                            bool draw_hook_installed,
+                                            int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 17 && oclass == 99;
+}
+
+// State 0 has not calculated the beam endpoints, and state 3 is disabled.
+// The active states need allocated pvars and a nonzero beam width.
+constexpr bool can_draw_fleet_laser(std::uint8_t state, std::uint32_t pvars,
+                                   float width) {
+    return (state == 1 || state == 2) && pvars != 0 && width > 0.0f;
+}
+
+// Guest callback addresses from the PAL/NTSC-U Veldin Orbit decompilation.
+constexpr std::uint32_t fleet_laser_draw_code_address(bool pal) {
+    return pal ? 0x002AA880u : 0x002A95B8u;
+}
+
+template <typename Enqueue>
+void enqueue_fleet_laser(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(fleet_laser_draw_code_address(pal), moby);
+}
+
 // Quartu's electric-water moby (655) both draws lightning and damages the
 // hero. Route it through a draw-only hook while Quick Select is held, never
 // through the regular scenery allowlist above. Other levels stay untouched.

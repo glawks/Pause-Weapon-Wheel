@@ -42,6 +42,7 @@ constexpr openrac::gaddr kNanotechBobPhase = 0x04u;
 constexpr openrac::gaddr kNanotechGroundVelocity = 0x50u;
 constexpr openrac::gaddr kMobyYaw = 0x48u;
 constexpr openrac::gaddr kPairedTargetSteeringVelocity = 0x38u;
+constexpr openrac::gaddr kFleetLaserWidth = 0x4Cu;
 
 // Game-code addresses from the RAC1 PAL and NTSC-U decompilations. Both
 // callbacks are resolved for the current loaded level; nothing is patched in
@@ -87,6 +88,9 @@ bool paired_target_first_effect_logged = false;
 bool paired_target_missing_clocks_warned = false;
 bool kalebo_wall_ribbon_hook = false;
 bool kalebo_wall_first_refresh_logged = false;
+bool fleet_laser_draw_hook = false;
+bool fleet_laser_first_draw_logged = false;
+bool fleet_laser_missing_draw_warned = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
 pause_policy::VendorBrightnessHold vendor_brightness;
 bool freeze_animations = true;
@@ -112,6 +116,7 @@ int nanotech_attached_glow_count = 0;
 int nanotech_detached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
 int kalebo_wall_ribbon_refresh_count = 0;
+int fleet_laser_draw_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -141,7 +146,8 @@ void report_pause_diagnostics() {
                        + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
                        + ", nanotech_detached_halo=" + std::to_string(nanotech_detached_glow_count)
                        + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count)
-                       + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count));
+                       + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count)
+                       + ", fleet_laser=" + std::to_string(fleet_laser_draw_count));
     }
     observed_level = -1;
     observed_classes.clear();
@@ -152,6 +158,7 @@ void report_pause_diagnostics() {
     nanotech_detached_glow_count = 0;
     nanotech_visual_draw_count = 0;
     kalebo_wall_ribbon_refresh_count = 0;
+    fleet_laser_draw_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -270,10 +277,12 @@ int gate_moby_update(void*, int slot, int phase) {
     const bool kalebo_wall_ribbons = pause_policy::should_route_kalebo_wall_ribbons(
         wheel_active, keep_water, world_gate, kalebo_wall_ribbon_hook,
         level, oclass, state, flags);
+    const bool fleet_laser_draw_only = pause_policy::should_route_fleet_laser_draw(
+        wheel_active, keep_water, world_gate, fleet_laser_draw_hook, level, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
                        || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
-                       || kalebo_wall_ribbons
+                       || kalebo_wall_ribbons || fleet_laser_draw_only
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
@@ -284,7 +293,7 @@ int gate_moby_update(void*, int slot, int phase) {
         // Class 803 instead runs just enough of its effect update to emit
         // the yellow link particles with its motion clocks stopped.
         if (vendor_draw_only || nanotech_draw_only || paired_target_effects
-            || kalebo_wall_ribbons) {
+            || kalebo_wall_ribbons || fleet_laser_draw_only) {
             // The visible moby animation can advance earlier in the game
             // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
@@ -333,6 +342,9 @@ void load(openrac::Mod& mod) {
     paired_target_missing_clocks_warned = false;
     kalebo_wall_ribbon_hook = false;
     kalebo_wall_first_refresh_logged = false;
+    fleet_laser_draw_hook = false;
+    fleet_laser_first_draw_logged = false;
+    fleet_laser_missing_draw_warned = false;
     vendor_phases.reset();
     vendor_brightness.reset();
     flagged_mobys.clear();
@@ -847,6 +859,60 @@ void load(openrac::Mod& mod) {
         mod.info("Kalebo linked-pair ribbon wall hook registered (class 552)");
     } catch (const openrac::Error&) {
         mod.warn("Kalebo class 552 hook unavailable; doorway ribbons remain paused");
+    }
+
+    // Veldin Orbit (Drek's Fleet) class 99 draws its red laser beams from
+    // pvars endpoints, but its normal update also moves the beam, performs
+    // collision/hit checks and emits particles. During Quick Select only
+    // enqueue the precomputed quad: no original() while the world is gated.
+    try {
+        mod.hook<openrac::rac1::Moby_Class99_Update>(
+            [](auto original, std::uint32_t moby) {
+                if (!wheel_active || !world_gate) {
+                    original(moby);
+                    return;
+                }
+                if (moby == 0) {
+                    return;
+                }
+                auto memory = game_mod->memory();
+                const auto oclass = memory.read<std::int16_t>(moby + kMobyClass);
+                if (!pause_policy::should_route_fleet_laser_draw(
+                        wheel_active, keep_water, world_gate, fleet_laser_draw_hook,
+                        game_mod->loaded_level(), oclass)) {
+                    return;
+                }
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                const auto width = pvars == 0 ? 0.0f
+                    : memory.read<float>(pvars + kFleetLaserWidth);
+                if (!pause_policy::can_draw_fleet_laser(state, pvars, width)) {
+                    return; // No initialized endpoints, or the beam is off.
+                }
+
+                const bool pal = game_mod->version() == "pal";
+                const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                    pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                    pause_policy::fleet_laser_draw_code_address(pal));
+                if (add == nullptr || draw == nullptr) {
+                    if (!fleet_laser_missing_draw_warned) {
+                        game_mod->warn("Veldin Orbit laser draw callback unavailable; hit-test update remains frozen");
+                        fleet_laser_missing_draw_warned = true;
+                    }
+                    return;
+                }
+                pause_policy::enqueue_fleet_laser(pal, moby, add);
+                ++fleet_laser_draw_count;
+                if (!fleet_laser_first_draw_logged) {
+                    game_mod->info("Veldin Orbit laser beams drawn while motion and hit tests stay paused");
+                    fleet_laser_first_draw_logged = true;
+                }
+            });
+        fleet_laser_draw_hook = true;
+        mod.info("Veldin Orbit class-99 laser draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Veldin Orbit class-99 hook unavailable; lasers remain paused");
     }
 
     try {

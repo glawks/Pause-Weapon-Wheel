@@ -120,6 +120,35 @@ int main() {
     assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 2, 0));
     assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 1, 2));
 
+    // Drek's Fleet / Veldin Orbit: class-99 laser beams share their normal
+    // update with collision hit tests. Only route them through a draw-only
+    // hook on this planet, after their beam geometry is initialized.
+    assert(should_route_fleet_laser_draw(true, true, true, true, 17, 99));
+    assert(!should_route_fleet_laser_draw(false, true, true, true, 17, 99));
+    assert(!should_route_fleet_laser_draw(true, false, true, true, 17, 99));
+    assert(!should_route_fleet_laser_draw(true, true, false, true, 17, 99));
+    assert(!should_route_fleet_laser_draw(true, true, true, false, 17, 99));
+    assert(!should_route_fleet_laser_draw(true, true, true, true, 16, 99));
+    assert(!should_route_fleet_laser_draw(true, true, true, true, 18, 99));
+    assert(!should_route_fleet_laser_draw(true, true, true, true, 17, 655));
+    assert(can_draw_fleet_laser(1, 0x1000u, 0.09f));
+    assert(can_draw_fleet_laser(2, 0x1000u, 0.09f));
+    assert(!can_draw_fleet_laser(0, 0x1000u, 0.09f));
+    assert(!can_draw_fleet_laser(3, 0x1000u, 0.09f));
+    assert(!can_draw_fleet_laser(2, 0, 0.09f));
+    assert(!can_draw_fleet_laser(1, 0x1000u, 0.0f));
+    assert(!can_draw_fleet_laser(1, 0x1000u, -1.0f));
+    assert(fleet_laser_draw_code_address(true) == 0x002AA880u);
+    assert(fleet_laser_draw_code_address(false) == 0x002A95B8u);
+    std::uint32_t fleet_draw_callback = 0;
+    std::uint32_t fleet_draw_target = 0;
+    enqueue_fleet_laser(false, 0x123456u,
+                        [&](std::uint32_t fn, std::uint32_t moby) {
+                            fleet_draw_callback = fn;
+                            fleet_draw_target = moby;
+                        });
+    assert(fleet_draw_callback == 0x002A95B8u && fleet_draw_target == 0x123456u);
+
     // Use only an initialized, active bolt. Ignore dormant hazards and
     // missing/deallocated effect storage rather than drawing garbage.
     assert(can_draw_quartu_electric_arc(1, 0x1000, 0));

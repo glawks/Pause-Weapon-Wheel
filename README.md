@@ -5,7 +5,8 @@
 > The `testing` branch contains unreleased experiments. The paired Swingshot
 > connection, Nanotech halo, Gadgetron vendor beam and vendor sphere-size hold
 > are confirmed working in NTSC-U testing. Kalebo's doorway wall and the
-> detached Nanotech glow are awaiting in-game confirmation.
+> detached Nanotech glow and Veldin Orbit laser beams are awaiting in-game
+> confirmation.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -22,8 +23,9 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep yellow paired Swingshot targets glowing (testing).** Replenish the particle stream connecting the two yellow spheres while temporarily stopping the target's motion clocks.
 - **Keep Nanotech crate glows visible (testing).** Refresh the purple particle halo both inside intact crates and around detached orbs after a crate breaks. Both visual updates hold the orb's movement; detached orbs temporarily mask the pickup path so Ratchet cannot collect health during Quick Select.
 - **Keep Kalebo III's purple doorway wall visible (testing).** Refresh the active linked-pair ribbon renderer while its switch and surrounding world-object updates remain paused. Awaiting in-game confirmation.
+- **Keep Veldin Orbit's red laser beams visible (testing).** Requeue the previously initialized beam quads without running the class-99 motion or hit-detection update. Awaiting in-game confirmation.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
-- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor refreshes, attached and detached Nanotech halo updates, and Kalebo wall-ribbon refreshes when Quick Select closes.
+- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor, Nanotech, Kalebo wall-ribbon and Veldin Orbit laser visual refreshes when Quick Select closes.
 
 ### Verified scenery fixes
 
@@ -94,6 +96,7 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The yellow paired Swingshot target's connection was confirmed visible in the initial user test. Its short-lived particles may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
 - The Nanotech crate's attached purple halo was confirmed working in NTSC-U testing. The new detached-orb particle refresh has been code-checked but still **needs in-game verification**. If the primary-orb pointer cannot be validated, it uses the existing draw-only fallback to avoid risking health collection. PAL behaviour remains unverified.
 - Kalebo III's class-552 linked-pair ribbons have only been verified against the decompiled update logic, **not yet in-game**. Their active-state refresh also maintains ambient wall audio, which may continue while the wheel is held; the wall switch and unrelated mobys are still paused.
+- Veldin Orbit's class-99 laser beam draw-only path is **not yet verified in-game**. The renderer uses the most recently calculated beam endpoints and width, which will remain stationary during Quick Select; the normal movement, particle spraying and hit detection stay blocked. This may omit some moving sparks while preserving the main red beam quads.
 
 ## Technical notes
 
@@ -108,6 +111,8 @@ Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow d
 Yellow paired Swingshot targets are class `803`. Their state-1 update emits the connection's particles rather than registering a dedicated draw callback. The experimental hook runs that update with its two movement clocks temporarily zeroed; class `758` targets remain frozen as before.
 
 Kalebo III's purple doorway wall is made from class `552` (`0x228`) linked-pair ribbons. Only the initialized group leader (state `1`, not flagged as a follower) is allowed to register its `draw_linked_pair_group_ribbons` callback during Quick Select; state-0 group initialization and class `546` wall-button updates are not unpaused. Its ribbon update also maintains an ambient sound handle.
+
+Veldin Orbit (Drek's Fleet, level `17`) uses class `99` for red scanning laser beams. Its full update both positions the beams and calls collision-hit routines, so the testing branch submits `draw_fleet_beam_quad` directly using the game callback addresses `0x002AA880` (PAL) or `0x002A95B8` (NTSC-U). This draws only initialized active beams and leaves the normal laser update frozen while the weapon wheel is open.
 
 Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
 
