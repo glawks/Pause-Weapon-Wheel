@@ -737,10 +737,16 @@ void load(openrac::Mod& mod) {
                     [&] { original(moby); },
                     [&] {
                         const bool pal = game_mod->version() == "pal";
+                        const int level = game_mod->loaded_level();
+                        const auto draw_address =
+                            pause_policy::nanotech_orb_code_address(pal, level);
+                        if (draw_address == 0) {
+                            return;
+                        }
                         const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
                             pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
                         const auto draw = game_mod->function_at<GameDrawEffectFn>(
-                            pause_policy::nanotech_orb_code_address(pal));
+                            draw_address);
                         if (add == nullptr || draw == nullptr) {
                             if (!nanotech_missing_draw_warned) {
                                 game_mod->warn("Nanotech glow draw unavailable; health pickup remains paused");
@@ -748,7 +754,7 @@ void load(openrac::Mod& mod) {
                             }
                             return;
                         }
-                        pause_policy::enqueue_nanotech_orb(pal, moby, add);
+                        pause_policy::enqueue_nanotech_orb(pal, level, moby, add);
                         ++nanotech_visual_draw_count;
                         if (!nanotech_first_draw_logged) {
                             game_mod->info("Nanotech orb visual-only draw enqueued during Quick Select");

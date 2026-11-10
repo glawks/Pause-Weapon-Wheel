@@ -349,9 +349,9 @@ int main() {
     assert(queued_code == 0x002A62D0u); // PAL vendor draw guest code
     assert(queued_moby == 0x654321u);
 
-    // Health crates create a separate class-806 Nanotech orb. Only the
-    // attached state-1 update may replenish glow particles under a pause;
-    // the detached state-2 update can heal Ratchet and is never executed.
+    // Health crates create a separate class-806 Nanotech orb. Attached
+    // state-1 refreshes glow with motion held; detached state-2 refreshes
+    // only after guards suppress collection and restore its physics.
     assert(should_route_nanotech_draw(true, true, true, true, 806));
     assert(!should_route_nanotech_draw(false, true, true, true, 806));
     assert(!should_route_nanotech_draw(true, false, true, true, 806));
@@ -405,11 +405,10 @@ int main() {
            == NP::DetachedRefresh);
 
     // The detached pickup's visual refresh masks the primary-orb pointer.
-    // NTSC-U relocates the PAL level-global by -0x100 (OpenRAC hostgen's
-    // core.lit relocation), so reading the adjacent +0x20 word would
-    // reject a valid detached orb and leave only its fading particles.
+    // NTSC-U's Nanotech update accesses D_L00_0015F63C directly. Do not
+    // infer this overlay-global from core.lit's unrelated relocation offset.
     assert(nanotech_primary_moby_global(true) == 0x0015F71Cu);
-    assert(nanotech_primary_moby_global(false) == 0x0015F61Cu);
+    assert(nanotech_primary_moby_global(false) == 0x0015F63Cu);
 
     // Only temporarily mask collection and velocity: restore *every*
     // captured guest word after the visual refresh, including exceptions.
@@ -471,10 +470,24 @@ int main() {
                                     [&] { assert(false); },
                                     [&] { assert(false); },
                                     [&] { assert(false); });
-    enqueue_nanotech_orb(false, 0x123456u, capture_guest_draw);
-    assert(queued_code == 0x002D9810u && queued_moby == 0x123456u);
-    enqueue_nanotech_orb(true, 0x654321u, capture_guest_draw);
-    assert(queued_code == 0x002DACC0u && queued_moby == 0x654321u);
+    // The shared Nanotech draw callback is relocated independently in
+    // each level's overlay, despite the function's level-00 symbol name.
+    assert(nanotech_orb_code_address(false, 0) == 0x002D9810u);
+    assert(nanotech_orb_code_address(true, 0) == 0x002DACC0u);
+    assert(nanotech_orb_code_address(false, 16) == 0x002D83C0u);
+    assert(nanotech_orb_code_address(true, 16) == 0x002D9788u);
+    assert(nanotech_orb_code_address(false, 18) == 0x002E39A0u);
+    assert(nanotech_orb_code_address(true, 18) == 0x002E4D90u);
+    assert(nanotech_orb_code_address(false, -1) == 0);
+    assert(nanotech_orb_code_address(false, 19) == 0);
+    enqueue_nanotech_orb(false, 16, 0x123456u, capture_guest_draw);
+    assert(queued_code == 0x002D83C0u && queued_moby == 0x123456u);
+    enqueue_nanotech_orb(true, 18, 0x654321u, capture_guest_draw);
+    assert(queued_code == 0x002E4D90u && queued_moby == 0x654321u);
+    queued_code = 0;
+    enqueue_nanotech_orb(false, -1, 0x123456u, capture_guest_draw);
+    enqueue_nanotech_orb(false, 19, 0x123456u, capture_guest_draw);
+    assert(queued_code == 0); // Never enqueue an invalid guest code address.
 
     // Class 803's yellow twin-target connection is replenished by its
     // particle emitter; class 758 is not the paired yellow target.

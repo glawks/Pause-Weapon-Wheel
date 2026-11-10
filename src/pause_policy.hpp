@@ -440,10 +440,11 @@ void with_restored_guest_words(const std::array<std::uint32_t, N>& addresses,
     restore();
 }
 
-// PAL is from the decomp's primary_nanotech_ball_moby definition.
-// NTSC-U's hostgen relocates globals past core.lit by -0x100, not -0xE0.
+// The game's Nanotech update accesses these overlay globals directly.
+// NTSC-U D_L00_0015F63C is NOT computed by applying core.lit's relocation
+// delta to the PAL primary_nanotech_ball_moby address.
 constexpr std::uint32_t nanotech_primary_moby_global(bool pal) {
-    return pal ? 0x0015F71Cu : 0x0015F61Cu;
+    return pal ? 0x0015F71Cu : 0x0015F63Cu;
 }
 
 template <typename Original, typename Draw, typename Emit>
@@ -471,15 +472,35 @@ void dispatch_nanotech_update(bool draw_only, bool drawable,
     }
 }
 
-// Original Nanotech glow sphere renderer. PAL: func_L00_002DACC0;
-// NTSC-U: FUN_L00_002D9810 from OpenRAC's carried source.
-constexpr std::uint32_t nanotech_orb_code_address(bool pal) {
-    return pal ? 0x002DACC0u : 0x002D9810u;
+// Original Nanotech glow sphere renderer (func_L00_002DACC0). Its code
+// address changes with each loaded overlay. These per-level addresses come
+// from rac1-decomp's PAL/US functions.tsv shared-function mappings.
+constexpr std::uint32_t nanotech_orb_code_address(bool pal, int level) {
+    constexpr std::array<std::uint32_t, 19> ntsc = {
+        0x002D9810u, 0x00301C00u, 0x002E4280u, 0x002D2B20u, 0x002DB9A0u,
+        0x0030B820u, 0x002E80C0u, 0x00304180u, 0x002FB390u, 0x002FAAC0u,
+        0x002CBC00u, 0x00301F58u, 0x002F9A70u, 0x002FC650u, 0x002F5B70u,
+        0x002DD048u, 0x002D83C0u, 0x002DB4F0u, 0x002E39A0u
+    };
+    constexpr std::array<std::uint32_t, 19> pal_addresses = {
+        0x002DACC0u, 0x00302FD8u, 0x002E56B8u, 0x002D3EE8u, 0x002DCD80u,
+        0x0030CC78u, 0x002E94F0u, 0x00305560u, 0x002FC850u, 0x002FBE70u,
+        0x002CCFC0u, 0x00303328u, 0x002FAE50u, 0x002FDAE8u, 0x002F6FF8u,
+        0x002DE438u, 0x002D9788u, 0x002DC9C8u, 0x002E4D90u
+    };
+    if (level < 0 || level >= static_cast<int>(ntsc.size())) {
+        return 0;
+    }
+    return pal ? pal_addresses[static_cast<std::size_t>(level)]
+               : ntsc[static_cast<std::size_t>(level)];
 }
 
 template <typename Enqueue>
-void enqueue_nanotech_orb(bool pal, std::uint32_t moby, Enqueue enqueue) {
-    enqueue(nanotech_orb_code_address(pal), moby);
+void enqueue_nanotech_orb(bool pal, int level, std::uint32_t moby, Enqueue enqueue) {
+    const auto address = nanotech_orb_code_address(pal, level);
+    if (address != 0) {
+        enqueue(address, moby);
+    }
 }
 
 // Two yellow Swingshot spheres are one class-803 target. Its state-1 update
