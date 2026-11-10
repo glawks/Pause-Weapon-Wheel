@@ -30,39 +30,6 @@ int main() {
     assert(!needs_update_for_water(5, 831));
     // Blackwater City has a separate ocean-grid callback controller.
     assert(needs_update_for_water(5, 879));
-    // The flood controller's ordinary update also queues its water draw.
-    // Re-enter it only through a draw-only hook so the rising water stays still.
-    assert(should_route_blackwater_water_draw(true, true, true, true, 5, 831));
-    assert(!should_route_blackwater_water_draw(true, true, true, false, 5, 831));
-    assert(!should_route_blackwater_water_draw(true, true, false, true, 5, 831));
-    assert(!should_route_blackwater_water_draw(true, false, true, true, 5, 831));
-    assert(!should_route_blackwater_water_draw(false, true, true, true, 5, 831));
-    assert(!should_route_blackwater_water_draw(true, true, true, true, 5, 879));
-    assert(!should_route_blackwater_water_draw(true, true, true, true, 7, 831));
-    int flood_original_calls = 0;
-    int flood_draw_calls = 0;
-    dispatch_blackwater_water_update(false,
-                                    [&] { ++flood_original_calls; },
-                                    [&] { ++flood_draw_calls; });
-    assert(flood_original_calls == 1 && flood_draw_calls == 0);
-    dispatch_blackwater_water_update(true,
-                                    [&] { ++flood_original_calls; },
-                                    [&] { ++flood_draw_calls; });
-    assert(flood_original_calls == 1 && flood_draw_calls == 1);
-    std::uint32_t flood_callback = 0;
-    std::uint32_t flood_moby = 0;
-    enqueue_blackwater_water_draw(false, 0x1234u,
-                                 [&](std::uint32_t address, std::uint32_t moby) {
-                                     flood_callback = address;
-                                     flood_moby = moby;
-                                 });
-    assert(flood_callback == 0x0030D678u && flood_moby == 0x1234u);
-    enqueue_blackwater_water_draw(true, 0xABCDu,
-                                 [&](std::uint32_t address, std::uint32_t moby) {
-                                     flood_callback = address;
-                                     flood_moby = moby;
-                                 });
-    assert(flood_callback == 0x0030EB40u && flood_moby == 0xABCDu);
     assert(!needs_update_for_water(4, 879));
     assert(!needs_update_for_water(6, 879));
     // Nebula G34: the dual-texture quad controller must enqueue its glass draw.

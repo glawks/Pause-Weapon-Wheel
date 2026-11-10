@@ -66,37 +66,6 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     }
 }
 
-// Blackwater's class 831 registers the flood-water draw but also advances the
-// flood stage even if frame_delta_time is zero. The normal update must stay
-// paused; its drawing is routed through a separate hook when available.
-constexpr bool should_route_blackwater_water_draw(bool wheel_active, bool keep_scenery,
-                                                   bool world_gate, bool draw_hook_installed,
-                                                   int level, int oclass) {
-    return wheel_active && keep_scenery && world_gate && draw_hook_installed
-           && level == 5 && oclass == 831;
-}
-
-template <typename Original, typename Draw>
-void dispatch_blackwater_water_update(bool draw_only, Original original, Draw draw) {
-    if (draw_only) {
-        draw();
-    } else {
-        original();
-    }
-}
-
-// Level 05's standalone DrawRipplePatches (render_level_water_grids) from the
-// original PAL and NTSC-U code. The game callback queue accepts guest code
-// addresses, never Mod::function_at's native host function pointer.
-constexpr std::uint32_t blackwater_water_draw_code_address(bool pal) {
-    return pal ? 0x0030EB40u : 0x0030D678u;
-}
-
-template <typename Enqueue>
-void enqueue_blackwater_water_draw(bool pal, std::uint32_t moby, Enqueue enqueue) {
-    enqueue(blackwater_water_draw_code_address(pal), moby);
-}
-
 // Veldin Orbit's yellow doorway spark field (class 78) and exterior air-flow
 // veil (class 1378) both register textured-quad callbacks on each update.
 // Their normal updates also spawn particles, manage linked mobys, or modify
