@@ -615,6 +615,21 @@ int main() {
     assert(needs_update_for_water(16, 471));
     assert(!needs_update_for_water(15, 471));
     assert(!needs_update_for_water(17, 471));
+    // Veldin Orbit: ripple-strip mobys enqueue water-surface callbacks.
+    // Six separate draw-only reflection mobys form its blue-tinted glass.
+    // Both update routines are visual-only after initialization.
+    for (int ripple_class : {1405, 1406, 1407, 1426}) {
+        assert(needs_update_for_water(17, ripple_class));
+        assert(!needs_update_for_water(18, ripple_class));
+    }
+    for (int reflection_class : {1907, 1908, 1910, 1911, 1913, 1918}) {
+        assert(needs_update_for_water(17, reflection_class));
+        assert(!needs_update_for_water(18, reflection_class));
+    }
+    // The nearby electric-water class is a hazard, not a safe draw controller.
+    assert(!needs_update_for_water(17, 655));
+    assert(!needs_update_for_water(17, 197));
+    assert(!needs_update_for_water(17, 1209));
     // Do not accidentally unpause Kalebo's doors or barriers.
     assert(!needs_update_for_water(16, 647));
     assert(!needs_update_for_water(16, 1443));

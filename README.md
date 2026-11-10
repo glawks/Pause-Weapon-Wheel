@@ -8,9 +8,10 @@
 > The detached Nanotech glow is still awaiting confirmation after a new
 > NTSC-U primary-pointer and per-level draw-address correction. The branch
 > logs extra read-only diagnostics for the detached safety gate.
-> Veldin Orbit's corridor lasers and distant fleet beam/impact glow await
-> confirmation. Final Veldin's green security barriers are confirmed in-game;
-> its class-1402 shaft/water-like textured mesh is undergoing a new test.
+> Veldin Orbit's distant planet beam and final Veldin's green security barriers
+> are confirmed in-game. Veldin Orbit's water ripples and reflective glass now
+> have a targeted test fix; final Veldin's class-1402 shaft mesh is also
+> undergoing an in-game check. The corridor lasers still await confirmation.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -28,7 +29,8 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Nanotech crate glows visible (testing).** Refresh the purple particle halo both inside intact crates and around detached orbs after a crate breaks. Both visual updates hold the orb's movement; detached orbs temporarily mask the pickup path so Ratchet cannot collect health during Quick Select.
 - **Keep Kalebo III's purple doorway wall visible (testing).** Refresh the active linked-pair ribbon renderer while its switch and surrounding world-object updates remain paused. Confirmed in-game on NTSC-U.
 - **Keep Veldin Orbit's red laser beams visible (testing).** Requeue the previously initialized beam quads without running the class-99 motion or hit-detection update. Awaiting in-game confirmation.
-- **Keep Veldin Orbit's distant fleet beam and planet impact visible (testing).** Requeue class 1772's original backdrop renderer, which draws the blue-white beam and purple impact glow, without running the scenery controller's update. Awaiting in-game confirmation.
+- **Keep Veldin Orbit's distant fleet beam and planet impact visible (testing).** Requeue class 1772's original backdrop renderer, which draws the blue-white beam and purple impact glow, without running the scenery controller's update. The distant beam was confirmed in-game on NTSC-U; the glow has not been separately checked.
+- **Keep Veldin Orbit's water and reflective glass visible (testing).** Allow the four visual-only water ripple-strip controllers and six reflective-mesh callbacks to run while the weapon wheel is open. Awaiting in-game confirmation.
 - **Keep the final Veldin's green security barriers visible (testing).** Requeue class 1392's active-state glow quads without running the linked Trespasser-pad, sound or collision update. Confirmed in-game on NTSC-U.
 - **Keep the final Veldin's shaft meshes visible (testing).** Requeue one of class 1402's three textured lift/shaft renderers without advancing the lift or linked scenery. Candidate fix for the missing water-like shaft effect; awaiting in-game confirmation.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
@@ -104,7 +106,8 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The Nanotech crate's attached purple halo was confirmed working in NTSC-U testing, but the detached-orb path remains unverified. The diagnostic log isolated two address errors: an incorrect primary-orb pointer (`0x0015F61C` instead of the game's `0x0015F63C`) and a level-00 draw callback reused in other overlays. Both mappings are corrected on `testing`, but need an in-game check. The `nanotech probe` log still separates state-1 fallback from state-2 pointer failures without running extra gameplay updates. PAL behaviour remains unverified.
 - Kalebo III's class-552 linked-pair ribbons were **confirmed visible in-game**. Their active-state refresh also maintains ambient wall audio, which may continue while the wheel is held; the wall switch and unrelated mobys are still paused.
 - Veldin Orbit's class-99 laser beam draw-only path is **not yet verified in-game**. The renderer uses the most recently calculated beam endpoints and width, which will remain stationary during Quick Select; the normal movement, particle spraying and hit detection stay blocked. This may omit some moving sparks while preserving the main red beam quads.
-- Veldin Orbit's class-1772 fleet backdrop draw-only path is **not yet verified in-game**. It preserves the precomputed beam endpoint and glow parameters, avoiding the controller's gameplay-affecting updates. Its draw callback may still scroll beam-texture UVs slightly while paused.
+- Veldin Orbit's class-1772 fleet backdrop draw-only path has its **distant beam confirmed in-game on NTSC-U**, but the impact glow has not been separately checked. It preserves the precomputed beam endpoint and glow parameters, avoiding the controller's gameplay-affecting updates. Its draw callback may still scroll beam-texture UVs slightly while paused.
+- Veldin Orbit's water/glass allowance is **not yet verified in-game**. The observed class `1405`/`1426` ripple-strip mobys and class `1907`/`1908`/`1910`/`1911`/`1913`/`1918` reflective-mesh mobys were previously frozen. The update routines initialise or enqueue scenery callbacks only, so they now remain active while Quick Select is open. Class `655` (electric-water hazard), underwater doors and rings remain paused.
 - Final Veldin's class-1392 green-barrier draw-only path was **confirmed in-game on NTSC-U**. It reuses initialized glow parameters without processing the linked puzzle or collision state. The glow's own scrolling UV phase can still advance a little while paused.
 - Final Veldin's class-1402 lift/shaft draw-only path is **not yet verified in-game**. The decompiled update submits a 25-, 38- or 22-quad renderer chosen by the lift's mesh selector, but also changes lift height, linked mobys and commands. The test branch redraws initialized meshes with those updates frozen. It is a candidate for the water-like surface missing in the level-18 shaft, not a confirmed water controller; mesh UV scrolling also stops while paused.
 
@@ -125,6 +128,8 @@ Kalebo III's purple doorway wall is made from class `552` (`0x228`) linked-pair 
 Veldin Orbit (Drek's Fleet, level `17`) uses class `99` for red scanning laser beams. Its full update both positions the beams and calls collision-hit routines, so the testing branch submits `draw_fleet_beam_quad` directly using the game callback addresses `0x002AA880` (PAL) or `0x002A95B8` (NTSC-U). This draws only initialized active beams and leaves the normal laser update frozen while the weapon wheel is open.
 
 The *distant* blue-white fleet beam and the pink-purple explosion against the planet are a separate class `1772` (`FleetReflectionUpdate`) effect. Its original draw callback, `draw_fleet_backdrop_quads`, emits two textured beam quads and five impact-glow quads. The testing branch enqueues this renderer using the guest address `0x002F4E30` (PAL) or `0x002F32F0` (NTSC-U), only after the controller reaches initialized state `1`; its normal update (which can change the hero fall state) remains paused.
+
+Veldin Orbit's missing water/ripple surface is drawn by the shared `ripple_strips_moby_update` controller (classes `1405`, `1406`, `1407`, `1426`), which queues the radial mesh renderer every frame after initialisation. The missing blue-tinted reflective glass is drawn by `draw_only_moby_update` (classes `1907`, `1908`, `1910`, `1911`, `1913`, `1918`), which likewise only initialises or queues reflection meshes. The `testing` branch permits these class updates on level `17` only. Unlike class `99`, none of these class update routines needs gameplay or collision logic, so no additional draw-only hook is needed.
 
 The green security lasers on the **final Veldin** (level `18`) are class `1392` (`trespasser_barrier_update`), distinct from both Veldin Orbit effects. In state `1` its original update queues `draw_trespasser_barrier_quads`, while also checking the linked Trespasser pad and potentially changing collision and sound. The testing branch queues the 12 glow quads without that state update via guest address `0x002F33D8` (PAL) or `0x002F1FD8` (NTSC-U). The state-0 setup and state-2 fade-out remain paused.
 

@@ -53,6 +53,13 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     case 16: // Kalebo III: conveyor strips, ocean/horizon, reflective mesh draws
         return oclass == 471 || oclass == 1111 || oclass == 1943 || oclass == 1947
                || oclass == 1948 || oclass == 1953;
+    case 17: // Veldin Orbit: water ripple strips and reflective glass meshes
+        // The ripple-strip update queues a water mesh in state 1; the
+        // reflection mobys only queue their mesh callbacks. No gameplay
+        // controller or electric-water hazard is exempted here.
+        return oclass == 1405 || oclass == 1406 || oclass == 1407 || oclass == 1426
+               || oclass == 1907 || oclass == 1908 || oclass == 1910
+               || oclass == 1911 || oclass == 1913 || oclass == 1918;
     default:
         return false;
     }
