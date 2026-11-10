@@ -73,7 +73,6 @@ bool vendor_draw_hook = false;
 bool vendor_first_draw_logged = false;
 bool vendor_missing_draw_warned = false;
 bool vendor_first_original_refresh_logged = false;
-bool blackwater_first_flood_hold_logged = false;
 bool nanotech_draw_hook = false;
 bool nanotech_first_draw_logged = false;
 bool nanotech_missing_draw_warned = false;
@@ -465,7 +464,6 @@ void load(openrac::Mod& mod) {
     vendor_first_draw_logged = false;
     vendor_missing_draw_warned = false;
     vendor_first_original_refresh_logged = false;
-    blackwater_first_flood_hold_logged = false;
     nanotech_draw_hook = false;
     nanotech_first_draw_logged = false;
     nanotech_missing_draw_warned = false;
@@ -554,40 +552,6 @@ void load(openrac::Mod& mod) {
         mod.info("Hoven scroll-hold hook registered (class 1901)");
     } catch (const openrac::Error&) {
         mod.warn("Hoven scroll-hold hook unavailable; water will still scroll");
-    }
-
-    // Blackwater City (level 5) uses class 831 for the flood water surface.
-    // Its update registers the visible water draw, but also advances the
-    // flood while Quick Select has frozen the rest of the world. As on
-    // Hoven, run just this update with the frame delta held at zero.
-    try {
-        mod.hook<openrac::rac1::Moby_Water_Update>([](auto original, std::uint32_t moby) {
-            const int level = game_mod->loaded_level();
-            if (!wheel_active || !keep_water || level != 5) {
-                original(moby);
-                return;
-            }
-            const auto clock_address = game_mod->relocate(frame_time_global);
-            if (clock_address == 0) {
-                // Preserve the visible surface if this port cannot resolve
-                // the clock; the diagnostic will expose the limitation.
-                original(moby);
-                return;
-            }
-            auto memory = game_mod->memory();
-            pause_policy::dispatch_blackwater_flood_update(
-                wheel_active, keep_water, level,
-                [&] { return memory.read<float>(clock_address); },
-                [&](float value) { memory.write<float>(clock_address, value); },
-                [&] { original(moby); });
-            if (!blackwater_first_flood_hold_logged) {
-                game_mod->info("Blackwater flood surface refreshed with its frame delta held at zero");
-                blackwater_first_flood_hold_logged = true;
-            }
-        });
-        mod.info("Blackwater flood clock-hold hook registered (class 831)");
-    } catch (const openrac::Error&) {
-        mod.warn("Blackwater flood clock-hold hook unavailable; rising water may continue during Quick Select");
     }
 
     // Quartu class 655 draws lightning, but its ordinary update also changes

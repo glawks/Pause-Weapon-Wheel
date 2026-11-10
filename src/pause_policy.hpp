@@ -24,8 +24,9 @@ constexpr bool needs_update_for_water(int level, int oclass) {
                || oclass == 761 || oclass == 1225;
     case 2:  // Aridia: ocean/mud draws are enqueued by this class each frame
         return oclass == 854;
-    case 5:  // Blackwater City: rising water + separate ocean grid callback
-        return oclass == 831 || oclass == 879;
+    case 5:  // Blackwater City: class 831 advances flood gameplay even with zero frame delta
+        // Class 879 independently registers the ocean grid draw callback.
+        return oclass == 879;
     case 6:  // Nebula G34: camera-selected dual-texture glass/quad callbacks
         return oclass == 1062;
     case 7:  // Umbris: rising-water grids + separate ocean draw callbacks
@@ -700,20 +701,6 @@ void with_stopped_frame_time(ReadTime read_time, WriteTime write_time, Update up
         throw;
     }
     write_time(saved);
-}
-
-// Blackwater's class-831 water surface registers its draw callback during
-// its full update. Keep that registration while Quick Select is open, but
-// suppress time-based flood progression for the duration of the update.
-template <typename ReadTime, typename WriteTime, typename Update>
-void dispatch_blackwater_flood_update(bool wheel_active, bool keep_scenery,
-                                     int level, ReadTime read_time,
-                                     WriteTime write_time, Update update) {
-    if (wheel_active && keep_scenery && level == 5) {
-        with_stopped_frame_time(read_time, write_time, update);
-    } else {
-        update();
-    }
 }
 
 // Restore both clocks even on errors. The zeroes are scoped to exactly one
