@@ -94,6 +94,12 @@ bool fleet_laser_missing_draw_warned = false;
 bool fleet_backdrop_draw_hook = false;
 bool fleet_backdrop_first_draw_logged = false;
 bool fleet_backdrop_missing_draw_warned = false;
+bool veldin_orbit_spark_draw_hook = false;
+bool veldin_orbit_spark_first_draw_logged = false;
+bool veldin_orbit_spark_missing_draw_warned = false;
+bool veldin_orbit_airflow_draw_hook = false;
+bool veldin_orbit_airflow_first_draw_logged = false;
+bool veldin_orbit_airflow_missing_draw_warned = false;
 bool veldin_final_barrier_draw_hook = false;
 bool veldin_final_barrier_first_draw_logged = false;
 bool veldin_final_barrier_missing_draw_warned = false;
@@ -132,6 +138,8 @@ int nanotech_probe_primary_class = -1;
 int kalebo_wall_ribbon_refresh_count = 0;
 int fleet_laser_draw_count = 0;
 int fleet_backdrop_draw_count = 0;
+int veldin_orbit_spark_draw_count = 0;
+int veldin_orbit_airflow_draw_count = 0;
 int veldin_final_barrier_draw_count = 0;
 int veldin_final_lift_draw_count = 0;
 
@@ -166,6 +174,8 @@ void report_pause_diagnostics() {
                        + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count)
                        + ", fleet_laser=" + std::to_string(fleet_laser_draw_count)
                        + ", fleet_backdrop=" + std::to_string(fleet_backdrop_draw_count)
+                       + ", orbit_spark_barrier=" + std::to_string(veldin_orbit_spark_draw_count)
+                       + ", orbit_airflow_veil=" + std::to_string(veldin_orbit_airflow_draw_count)
                        + ", veldin_final_barrier=" + std::to_string(veldin_final_barrier_draw_count)
                        + ", veldin_final_lift=" + std::to_string(veldin_final_lift_draw_count));
         const auto count = [](pause_policy::NanotechPauseProbe category) {
@@ -207,6 +217,8 @@ void report_pause_diagnostics() {
     kalebo_wall_ribbon_refresh_count = 0;
     fleet_laser_draw_count = 0;
     fleet_backdrop_draw_count = 0;
+    veldin_orbit_spark_draw_count = 0;
+    veldin_orbit_airflow_draw_count = 0;
     veldin_final_barrier_draw_count = 0;
     veldin_final_lift_draw_count = 0;
 }
@@ -331,6 +343,10 @@ int gate_moby_update(void*, int slot, int phase) {
         wheel_active, keep_water, world_gate, fleet_laser_draw_hook, level, oclass);
     const bool fleet_backdrop_draw_only = pause_policy::should_route_fleet_backdrop_draw(
         wheel_active, keep_water, world_gate, fleet_backdrop_draw_hook, level, oclass);
+    const bool veldin_orbit_doorway_draw_only = pause_policy::should_route_veldin_orbit_doorway_draw(
+        wheel_active, keep_water, world_gate,
+        oclass == 78 ? veldin_orbit_spark_draw_hook : veldin_orbit_airflow_draw_hook,
+        level, oclass);
     const bool veldin_final_barrier_draw_only = pause_policy::should_route_veldin_final_barrier_draw(
         wheel_active, keep_water, world_gate, veldin_final_barrier_draw_hook, level, oclass);
     const bool veldin_final_lift_draw_only = pause_policy::should_route_veldin_final_lift_draw(
@@ -339,7 +355,8 @@ int gate_moby_update(void*, int slot, int phase) {
                        || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
                        || kalebo_wall_ribbons || fleet_laser_draw_only
-                       || fleet_backdrop_draw_only || veldin_final_barrier_draw_only
+                       || fleet_backdrop_draw_only || veldin_orbit_doorway_draw_only
+                       || veldin_final_barrier_draw_only
                        || veldin_final_lift_draw_only
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
@@ -352,7 +369,8 @@ int gate_moby_update(void*, int slot, int phase) {
         // the yellow link particles with its motion clocks stopped.
         if (vendor_draw_only || nanotech_draw_only || paired_target_effects
             || kalebo_wall_ribbons || fleet_laser_draw_only || fleet_backdrop_draw_only
-            || veldin_final_barrier_draw_only || veldin_final_lift_draw_only) {
+            || veldin_orbit_doorway_draw_only || veldin_final_barrier_draw_only
+            || veldin_final_lift_draw_only) {
             // The visible moby animation can advance earlier in the game
             // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
@@ -364,6 +382,66 @@ int gate_moby_update(void*, int slot, int phase) {
         stop_animation(moby, array_base, level, oclass);
     }
     return 1; // Skip its gameplay update, as in the original mod.
+}
+
+// Level 17 has two visually similar but independent doorway effects. Class 78
+// draws the yellow spark field and class 1378 draws the layered air-flow veil.
+// Their full updates spawn particles or modify the hero's updraft state, so
+// register only the original textured-quad callbacks while Quick Select is up.
+template <typename Original>
+void refresh_veldin_orbit_doorway(Original original, std::uint32_t moby) {
+    if (!wheel_active || !world_gate) {
+        original(moby);
+        return;
+    }
+    if (moby == 0) {
+        return;
+    }
+
+    const auto memory = game_mod->memory();
+    const int oclass = memory.read<std::int16_t>(moby + kMobyClass);
+    const bool hook_installed = oclass == 78 ? veldin_orbit_spark_draw_hook
+                                                     : veldin_orbit_airflow_draw_hook;
+    if (!pause_policy::should_route_veldin_orbit_doorway_draw(
+            wheel_active, keep_water, world_gate, hook_installed,
+            game_mod->loaded_level(), oclass)) {
+        return;
+    }
+    const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+    const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+    if (!pause_policy::can_draw_veldin_orbit_doorway(oclass, state, pvars)) {
+        return;
+    }
+
+    const bool pal = game_mod->version() == "pal";
+    const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+        pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+    const auto draw = game_mod->function_at<GameDrawEffectFn>(
+        pause_policy::veldin_orbit_doorway_draw_code_address(pal, oclass));
+    bool& missing_logged = oclass == 78 ? veldin_orbit_spark_missing_draw_warned
+                                         : veldin_orbit_airflow_missing_draw_warned;
+    if (add == nullptr || draw == nullptr) {
+        if (!missing_logged) {
+            game_mod->warn(oclass == 78
+                ? "Veldin Orbit spark-field draw callback unavailable; original update stays paused"
+                : "Veldin Orbit air-flow draw callback unavailable; updraft stays paused");
+            missing_logged = true;
+        }
+        return;
+    }
+
+    pause_policy::enqueue_veldin_orbit_doorway(pal, oclass, moby, add);
+    int& count = oclass == 78 ? veldin_orbit_spark_draw_count
+                             : veldin_orbit_airflow_draw_count;
+    ++count;
+    bool& first_logged = oclass == 78 ? veldin_orbit_spark_first_draw_logged
+                                      : veldin_orbit_airflow_first_draw_logged;
+    if (!first_logged) {
+        game_mod->info(oclass == 78
+            ? "Veldin Orbit doorway spark-field quads drawn while emitter gameplay remains paused"
+            : "Veldin Orbit exterior air-flow veil drawn while hero updraft remains paused");
+        first_logged = true;
+    }
 }
 
 void load(openrac::Mod& mod) {
@@ -411,6 +489,12 @@ void load(openrac::Mod& mod) {
     fleet_backdrop_draw_hook = false;
     fleet_backdrop_first_draw_logged = false;
     fleet_backdrop_missing_draw_warned = false;
+    veldin_orbit_spark_draw_hook = false;
+    veldin_orbit_spark_first_draw_logged = false;
+    veldin_orbit_spark_missing_draw_warned = false;
+    veldin_orbit_airflow_draw_hook = false;
+    veldin_orbit_airflow_first_draw_logged = false;
+    veldin_orbit_airflow_missing_draw_warned = false;
     veldin_final_barrier_draw_hook = false;
     veldin_final_barrier_first_draw_logged = false;
     veldin_final_barrier_missing_draw_warned = false;
@@ -1059,6 +1143,33 @@ void load(openrac::Mod& mod) {
         mod.info("Veldin Orbit class-1772 fleet backdrop draw-only hook registered");
     } catch (const openrac::Error&) {
         mod.warn("Veldin Orbit class-1772 hook unavailable; distant beam remains paused");
+    }
+
+    // Veldin Orbit's left doorway spark field is class 78: its normal update
+    // emits particles, checks linked state and queues its mesh renderer.
+    // The right exterior vacuum-looking veil uses class 1378: its update
+    // writes Ratchet's updraft state before queueing animated layers.
+    // Hook each class independently and refresh only the visual callback.
+    try {
+        mod.hook<openrac::rac1::Moby_Class78_Update>(
+            [](auto original, std::uint32_t moby) {
+                refresh_veldin_orbit_doorway(original, moby);
+            });
+        veldin_orbit_spark_draw_hook = true;
+        mod.info("Veldin Orbit class-78 doorway spark-field draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Veldin Orbit class-78 hook unavailable; spark field remains paused");
+    }
+
+    try {
+        mod.hook<openrac::rac1::Moby_Class1378_Update>(
+            [](auto original, std::uint32_t moby) {
+                refresh_veldin_orbit_doorway(original, moby);
+            });
+        veldin_orbit_airflow_draw_hook = true;
+        mod.info("Veldin Orbit class-1378 exterior air-flow draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Veldin Orbit class-1378 hook unavailable; air-flow veil remains paused");
     }
 
     // Final Veldin's green Trespasser barriers are class 1392. Their active

@@ -65,6 +65,44 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     }
 }
 
+// Veldin Orbit's yellow doorway spark field (class 78) and exterior air-flow
+// veil (class 1378) both register textured-quad callbacks on each update.
+// Their normal updates also spawn particles, manage linked mobys, or modify
+// Ratchet's updraft state. Never exempt those full gameplay updates.
+constexpr bool should_route_veldin_orbit_doorway_draw(bool wheel_active,
+                                                      bool keep_scenery, bool world_gate,
+                                                      bool draw_hook_installed,
+                                                      int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 17 && (oclass == 78 || oclass == 1378);
+}
+
+// The spark emitter draws in state 1 (emitting) or state 2 (fading). The
+// air-flow veil draws only in active state 1. Both use their initialized pvars.
+constexpr bool can_draw_veldin_orbit_doorway(int oclass, std::uint8_t state,
+                                            std::uint32_t pvars) {
+    return pvars != 0 && ((oclass == 78 && (state == 1 || state == 2))
+                          || (oclass == 1378 && state == 1));
+}
+
+// Original level-17 guest draw routines, corroborated by both decompilations:
+// PAL func_L15_002A4318 / func_L10_002EA578, and NTSC-U counterparts.
+constexpr std::uint32_t veldin_orbit_doorway_draw_code_address(bool pal, int oclass) {
+    if (oclass == 78) {
+        return pal ? 0x002A9AD0u : 0x002A8808u;
+    }
+    if (oclass == 1378) {
+        return pal ? 0x002EB288u : 0x002E9798u;
+    }
+    return 0u;
+}
+
+template <typename Enqueue>
+void enqueue_veldin_orbit_doorway(bool pal, int oclass, std::uint32_t moby,
+                                 Enqueue enqueue) {
+    enqueue(veldin_orbit_doorway_draw_code_address(pal, oclass), moby);
+}
+
 // Kalebo III's purple horizontal doorway wall is a group of class-552
 // linked-pair ribbons. Its state-1 leader update registers the draw callback
 // and maintains sound; state 0 initializes/links mobys, so never run it

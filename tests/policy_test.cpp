@@ -96,6 +96,10 @@ int main() {
     assert(!needs_update_for_water(15, 655));
     assert(!needs_update_for_water(14, 1408));
     assert(!needs_update_for_water(16, 1408));
+    // Veldin Orbit's doorway spark field and vacuum air flow must not run
+    // their ordinary gameplay/particle updates just to remain visible.
+    assert(!needs_update_for_water(17, 78));
+    assert(!needs_update_for_water(17, 1378));
     // The Quartu electric controller is routed only when its draw-only hook
     // is present; never turn the hazard's full update loose during a pause.
     assert(should_route_quartu_electric_draw(true, true, true, true, 15, 655));
@@ -119,6 +123,50 @@ int main() {
     assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 0, 0));
     assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 2, 0));
     assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 1, 2));
+
+    // The yellow spark barrier and the exterior air-flow veil are separate
+    // Veldin Orbit controllers. Keep their original draw queues while paused
+    // without spawning sparks or writing the hero's updraft flag.
+    assert(should_route_veldin_orbit_doorway_draw(true, true, true, true, 17, 78));
+    assert(should_route_veldin_orbit_doorway_draw(true, true, true, true, 17, 1378));
+    assert(!should_route_veldin_orbit_doorway_draw(false, true, true, true, 17, 78));
+    assert(!should_route_veldin_orbit_doorway_draw(true, false, true, true, 17, 78));
+    assert(!should_route_veldin_orbit_doorway_draw(true, true, false, true, 17, 78));
+    assert(!should_route_veldin_orbit_doorway_draw(true, true, true, false, 17, 78));
+    assert(!should_route_veldin_orbit_doorway_draw(true, true, true, true, 16, 78));
+    assert(!should_route_veldin_orbit_doorway_draw(true, true, true, true, 18, 1378));
+    assert(!should_route_veldin_orbit_doorway_draw(true, true, true, true, 17, 99));
+    assert(can_draw_veldin_orbit_doorway(78, 1, 0x1000u));
+    assert(can_draw_veldin_orbit_doorway(78, 2, 0x1000u));
+    assert(!can_draw_veldin_orbit_doorway(78, 0, 0x1000u));
+    assert(!can_draw_veldin_orbit_doorway(78, 3, 0x1000u));
+    assert(can_draw_veldin_orbit_doorway(1378, 1, 0x1000u));
+    assert(!can_draw_veldin_orbit_doorway(1378, 0, 0x1000u));
+    assert(!can_draw_veldin_orbit_doorway(1378, 2, 0x1000u));
+    assert(!can_draw_veldin_orbit_doorway(78, 1, 0u));
+    assert(!can_draw_veldin_orbit_doorway(1378, 1, 0u));
+    assert(!can_draw_veldin_orbit_doorway(99, 1, 0x1000u));
+    assert(veldin_orbit_doorway_draw_code_address(true, 78) == 0x002A9AD0u);
+    assert(veldin_orbit_doorway_draw_code_address(false, 78) == 0x002A8808u);
+    assert(veldin_orbit_doorway_draw_code_address(true, 1378) == 0x002EB288u);
+    assert(veldin_orbit_doorway_draw_code_address(false, 1378) == 0x002E9798u);
+    assert(veldin_orbit_doorway_draw_code_address(false, 99) == 0u);
+    std::uint32_t doorway_draw_callback = 0;
+    std::uint32_t doorway_draw_target = 0;
+    enqueue_veldin_orbit_doorway(false, 78, 0x123456u,
+                               [&](std::uint32_t fn, std::uint32_t target) {
+                                   doorway_draw_callback = fn;
+                                   doorway_draw_target = target;
+                               });
+    assert(doorway_draw_callback == 0x002A8808u);
+    assert(doorway_draw_target == 0x123456u);
+    enqueue_veldin_orbit_doorway(true, 1378, 0xabcdefu,
+                               [&](std::uint32_t fn, std::uint32_t target) {
+                                   doorway_draw_callback = fn;
+                                   doorway_draw_target = target;
+                               });
+    assert(doorway_draw_callback == 0x002EB288u);
+    assert(doorway_draw_target == 0xabcdefu);
 
     // Drek's Fleet / Veldin Orbit: class-99 laser beams share their normal
     // update with collision hit tests. Only route them through a draw-only
