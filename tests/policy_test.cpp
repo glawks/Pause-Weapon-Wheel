@@ -387,6 +387,13 @@ int main() {
     assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0, 806));
     assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0x2000u, 501));
 
+    // The detached pickup's visual refresh masks the primary-orb pointer.
+    // NTSC-U relocates the PAL level-global by -0x100 (OpenRAC hostgen's
+    // core.lit relocation), so reading the adjacent +0x20 word would
+    // reject a valid detached orb and leave only its fading particles.
+    assert(nanotech_primary_moby_global(true) == 0x0015F71Cu);
+    assert(nanotech_primary_moby_global(false) == 0x0015F61Cu);
+
     // Only temporarily mask collection and velocity: restore *every*
     // captured guest word after the visual refresh, including exceptions.
     std::array<std::uint32_t, 3> detached_words = {0x10u, 0x20u, 0x30u};

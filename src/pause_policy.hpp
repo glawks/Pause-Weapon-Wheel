@@ -408,10 +408,10 @@ void with_restored_guest_words(const std::array<std::uint32_t, N>& addresses,
     restore();
 }
 
-// PAL is from the decomp's primary_nanotech_ball_moby definition;
-// NTSC-U is the corresponding level-global offset in the same data block.
+// PAL is from the decomp's primary_nanotech_ball_moby definition.
+// NTSC-U's hostgen relocates globals past core.lit by -0x100, not -0xE0.
 constexpr std::uint32_t nanotech_primary_moby_global(bool pal) {
-    return pal ? 0x0015F71Cu : 0x0015F63Cu;
+    return pal ? 0x0015F71Cu : 0x0015F61Cu;
 }
 
 template <typename Original, typename Draw, typename Emit>
