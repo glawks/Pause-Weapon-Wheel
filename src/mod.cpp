@@ -69,6 +69,9 @@ bool world_gate = false;
 bool quartu_electric_draw_hook = false;
 bool quartu_electric_first_draw_logged = false;
 bool quartu_electric_missing_draw_warned = false;
+bool blackwater_water_draw_hook = false;
+bool blackwater_water_first_draw_logged = false;
+bool blackwater_water_missing_draw_warned = false;
 bool vendor_draw_hook = false;
 bool vendor_first_draw_logged = false;
 bool vendor_missing_draw_warned = false;
@@ -139,6 +142,7 @@ int veldin_orbit_spark_draw_count = 0;
 int veldin_orbit_airflow_draw_count = 0;
 int veldin_final_barrier_draw_count = 0;
 int veldin_final_lift_draw_count = 0;
+int blackwater_water_draw_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -174,7 +178,8 @@ void report_pause_diagnostics() {
                        + ", orbit_spark_barrier=" + std::to_string(veldin_orbit_spark_draw_count)
                        + ", orbit_airflow_veil=" + std::to_string(veldin_orbit_airflow_draw_count)
                        + ", veldin_final_barrier=" + std::to_string(veldin_final_barrier_draw_count)
-                       + ", veldin_final_lift=" + std::to_string(veldin_final_lift_draw_count));
+                       + ", veldin_final_lift=" + std::to_string(veldin_final_lift_draw_count)
+                       + ", blackwater_water_draw=" + std::to_string(blackwater_water_draw_count));
         const auto count = [](pause_policy::NanotechPauseProbe category) {
             return nanotech_probe_counts[static_cast<std::size_t>(category)];
         };
@@ -218,6 +223,7 @@ void report_pause_diagnostics() {
     veldin_orbit_airflow_draw_count = 0;
     veldin_final_barrier_draw_count = 0;
     veldin_final_lift_draw_count = 0;
+    blackwater_water_draw_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -348,8 +354,10 @@ int gate_moby_update(void*, int slot, int phase) {
         wheel_active, keep_water, world_gate, veldin_final_barrier_draw_hook, level, oclass);
     const bool veldin_final_lift_draw_only = pause_policy::should_route_veldin_final_lift_draw(
         wheel_active, keep_water, world_gate, veldin_final_lift_draw_hook, level, oclass);
+    const bool blackwater_water_draw_only = pause_policy::should_route_blackwater_water_draw(
+        wheel_active, keep_water, world_gate, blackwater_water_draw_hook, level, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
-                       || vendor_draw_only
+                       || blackwater_water_draw_only || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
                        || kalebo_wall_ribbons || fleet_laser_draw_only
                        || fleet_backdrop_draw_only || veldin_orbit_doorway_draw_only
@@ -364,7 +372,7 @@ int gate_moby_update(void*, int slot, int phase) {
         // Class 655 and the class-806 health orb use draw-only hooks.
         // Class 803 instead runs just enough of its effect update to emit
         // the yellow link particles with its motion clocks stopped.
-        if (vendor_draw_only || nanotech_draw_only || paired_target_effects
+        if (blackwater_water_draw_only || vendor_draw_only || nanotech_draw_only || paired_target_effects
             || kalebo_wall_ribbons || fleet_laser_draw_only || fleet_backdrop_draw_only
             || veldin_orbit_doorway_draw_only || veldin_final_barrier_draw_only
             || veldin_final_lift_draw_only) {
@@ -460,6 +468,9 @@ void load(openrac::Mod& mod) {
     quartu_electric_draw_hook = false;
     quartu_electric_first_draw_logged = false;
     quartu_electric_missing_draw_warned = false;
+    blackwater_water_draw_hook = false;
+    blackwater_water_first_draw_logged = false;
+    blackwater_water_missing_draw_warned = false;
     vendor_draw_hook = false;
     vendor_first_draw_logged = false;
     vendor_missing_draw_warned = false;
@@ -525,6 +536,50 @@ void load(openrac::Mod& mod) {
             original();
         }
     });
+
+    // Blackwater's class 831 advances the flood stage inside its full update
+    // (even with zero frame delta) and also queues the water-grid renderer.
+    // Re-enqueue the original renderer without calling that update, keeping
+    // both the existing water height and its visible surface while paused.
+    // Other levels continue using the normal class-831 update.
+    try {
+        mod.hook<openrac::rac1::Moby_Water_Update>(
+            [](auto original, std::uint32_t moby) {
+                const bool draw_only = pause_policy::should_route_blackwater_water_draw(
+                    wheel_active, keep_water, world_gate, blackwater_water_draw_hook,
+                    game_mod->loaded_level(), 831);
+                pause_policy::dispatch_blackwater_water_update(
+                    draw_only,
+                    [&] { original(moby); },
+                    [&] {
+                        if (moby == 0) {
+                            return;
+                        }
+                        const bool pal = game_mod->version() == "pal";
+                        const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::blackwater_water_draw_code_address(pal));
+                        if (add == nullptr || draw == nullptr) {
+                            if (!blackwater_water_missing_draw_warned) {
+                                game_mod->warn("Blackwater draw-only water renderer unavailable; flood stays frozen");
+                                blackwater_water_missing_draw_warned = true;
+                            }
+                            return;
+                        }
+                        pause_policy::enqueue_blackwater_water_draw(pal, moby, add);
+                        ++blackwater_water_draw_count;
+                        if (!blackwater_water_first_draw_logged) {
+                            game_mod->info("Blackwater water grid draw-only callback queued; flood update stays frozen");
+                            blackwater_water_first_draw_logged = true;
+                        }
+                    });
+            });
+        blackwater_water_draw_hook = true;
+        mod.info("Blackwater class-831 water draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Blackwater class-831 draw hook unavailable; flood remains frozen but water may disappear while paused");
+    }
 
     // Class 1901 draws Hoven's scrolling layered surface. Skipping its update
     // removes the surface, but running it normally advances the UV phases.
