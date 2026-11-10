@@ -2,7 +2,7 @@
   "format": 2,
   "id": "pause-weapon-wheel",
   "name": "Weapon Wheel Pause",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "glawks",
   "description": "Pause RAC1 during Quick Select while preserving water, scenery and visual effects, with animation freezing and configurable background shading.",
   "license": "MIT",
@@ -16,14 +16,20 @@
   "hooks": [
     "rac1.player.update",
     "rac1.hud.quick_select.update",
+    "rac1.hud.quick_select.draw",
+    "rac1.moby.water_surface.update",
     "rac1.moby.moby1901.update",
+    "rac1.moby.class_655.update",
     "rac1.moby.light_beam.update",
     "rac1.moby.nanotech_ball.update",
     "rac1.moby.hideable_flower.update",
     "rac1.moby.moby552.update",
     "rac1.moby.moby99.update",
     "rac1.moby.fleet_reflection.update",
-    "rac1.moby.moby1392.update"
+    "rac1.moby.moby78.update",
+    "rac1.moby.moby1378.update",
+    "rac1.moby.moby1392.update",
+    "rac1.moby.moby1402.update"
   ],
   "settings": [
     {

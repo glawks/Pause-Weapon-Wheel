@@ -39,6 +39,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
+      - name: Check release metadata and hook declarations
+        run: python tests/release_preflight.py --sdk-header .openrac/sdk/include/openrac/games/rac1.hpp
       - name: Select and verify release tag
         env:
           REQUESTED_RELEASE_TAG: ${{ inputs.publish_tag }}
@@ -83,10 +85,15 @@ jobs:
           package="dist/pause-weapon-wheel-$version-windows-x86_64.zip"
           test -f "$package"
           python -c 'import sys,zipfile; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); assert "openrac-mod.json" in names; assert "lib/windows-x86_64/weapon_wheel_pause.dll" in names' "$package"
+      - name: Generate and verify release checksums
+        run: |
+          (cd dist && sha256sum *.zip > SHA256SUMS && sha256sum --check SHA256SUMS)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: pause-weapon-wheel-windows-x86_64
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
           if-no-files-found: error
       - name: Publish GitHub Release
         if: env.RELEASE_TAG != ''
@@ -101,10 +108,10 @@ jobs:
               -f "sha=$GITHUB_SHA"
           fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/*.zip --clobber
+            gh release upload "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS --clobber
             gh release edit "$RELEASE_TAG" --title "Weapon Wheel Pause $RELEASE_TAG"
           else
-            gh release create "$RELEASE_TAG" dist/*.zip \
+            gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS \
               --verify-tag \
               --generate-notes \
               --title "Weapon Wheel Pause $RELEASE_TAG"
