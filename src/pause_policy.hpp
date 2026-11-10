@@ -384,6 +384,38 @@ constexpr bool can_emit_detached_nanotech_glow(std::uint8_t state,
     return state == 2 && pvars != 0 && primary != 0 && primary_class == 806;
 }
 
+// Read-only diagnostic for identifying which gate rejects a paused class-806
+// orb. This never grants an update or mutates a guest pointer/state.
+enum class NanotechPauseProbe : std::uint8_t {
+    NotDrawable,
+    AttachedRefresh,
+    AttachedFallback,
+    DetachedRefresh,
+    DetachedNoSlot,
+    DetachedNoPrimary,
+    DetachedOutsideArray,
+    DetachedWrongClass,
+    Count
+};
+
+constexpr NanotechPauseProbe nanotech_pause_probe(bool drawable,
+                                                  std::uint8_t state,
+                                                  bool attached_refresh,
+                                                  std::uint32_t primary_slot,
+                                                  std::uint32_t primary,
+                                                  bool primary_active,
+                                                  int primary_class) {
+    if (!drawable) return NanotechPauseProbe::NotDrawable;
+    if (state == 1) return attached_refresh
+        ? NanotechPauseProbe::AttachedRefresh : NanotechPauseProbe::AttachedFallback;
+    if (state != 2) return NanotechPauseProbe::NotDrawable;
+    if (primary_slot == 0) return NanotechPauseProbe::DetachedNoSlot;
+    if (primary == 0) return NanotechPauseProbe::DetachedNoPrimary;
+    if (!primary_active) return NanotechPauseProbe::DetachedOutsideArray;
+    if (primary_class != 806) return NanotechPauseProbe::DetachedWrongClass;
+    return NanotechPauseProbe::DetachedRefresh;
+}
+
 // Keep all temporary guest-memory changes scoped to one original update,
 // including an exception from the original (which must never leave the
 // primary-orb pointer cleared or the orb in a moved position).

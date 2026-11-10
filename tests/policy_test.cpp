@@ -387,6 +387,23 @@ int main() {
     assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0, 806));
     assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0x2000u, 501));
 
+    // Distinguish a loose pickup that is never routed from one whose
+    // primary pointer fails the safety gate. These probe results must not
+    // change the actual paused update or heal Ratchet.
+    using NP = NanotechPauseProbe;
+    assert(nanotech_pause_probe(false, 2, false, 0, 0, false, -1) == NP::NotDrawable);
+    assert(nanotech_pause_probe(true, 1, true, 0, 0, false, -1) == NP::AttachedRefresh);
+    assert(nanotech_pause_probe(true, 1, false, 0, 0, false, -1) == NP::AttachedFallback);
+    assert(nanotech_pause_probe(true, 2, false, 0, 0, false, -1) == NP::DetachedNoSlot);
+    assert(nanotech_pause_probe(true, 2, false, 0x1000u, 0, false, -1)
+           == NP::DetachedNoPrimary);
+    assert(nanotech_pause_probe(true, 2, false, 0x1000u, 0x2000u, false, -1)
+           == NP::DetachedOutsideArray);
+    assert(nanotech_pause_probe(true, 2, false, 0x1000u, 0x2000u, true, 501)
+           == NP::DetachedWrongClass);
+    assert(nanotech_pause_probe(true, 2, false, 0x1000u, 0x2000u, true, 806)
+           == NP::DetachedRefresh);
+
     // The detached pickup's visual refresh masks the primary-orb pointer.
     // NTSC-U relocates the PAL level-global by -0x100 (OpenRAC hostgen's
     // core.lit relocation), so reading the adjacent +0x20 word would

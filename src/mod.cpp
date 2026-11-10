@@ -121,6 +121,11 @@ int vendor_original_refresh_count = 0;
 int nanotech_attached_glow_count = 0;
 int nanotech_detached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
+std::array<int, static_cast<std::size_t>(pause_policy::NanotechPauseProbe::Count)>
+    nanotech_probe_counts{};
+std::uint32_t nanotech_probe_primary_slot = 0;
+std::uint32_t nanotech_probe_primary_ptr = 0;
+int nanotech_probe_primary_class = -1;
 int kalebo_wall_ribbon_refresh_count = 0;
 int fleet_laser_draw_count = 0;
 int fleet_backdrop_draw_count = 0;
@@ -158,6 +163,29 @@ void report_pause_diagnostics() {
                        + ", fleet_laser=" + std::to_string(fleet_laser_draw_count)
                        + ", fleet_backdrop=" + std::to_string(fleet_backdrop_draw_count)
                        + ", veldin_final_barrier=" + std::to_string(veldin_final_barrier_draw_count));
+        const auto count = [](pause_policy::NanotechPauseProbe category) {
+            return nanotech_probe_counts[static_cast<std::size_t>(category)];
+        };
+        game_mod->info("pause diagnostic nanotech probe: attached_ok="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::AttachedRefresh))
+                       + ", attached_fallback="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::AttachedFallback))
+                       + ", detached_ok="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::DetachedRefresh))
+                       + ", detached_no_slot="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::DetachedNoSlot))
+                       + ", detached_no_primary="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::DetachedNoPrimary))
+                       + ", detached_outside_array="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::DetachedOutsideArray))
+                       + ", detached_wrong_class="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::DetachedWrongClass))
+                       + ", other="
+                       + std::to_string(count(pause_policy::NanotechPauseProbe::NotDrawable)));
+        game_mod->info("pause diagnostic nanotech primary sample: slot="
+                       + std::to_string(nanotech_probe_primary_slot)
+                       + ", pointer=" + std::to_string(nanotech_probe_primary_ptr)
+                       + ", class=" + std::to_string(nanotech_probe_primary_class));
     }
     observed_level = -1;
     observed_classes.clear();
@@ -167,6 +195,10 @@ void report_pause_diagnostics() {
     nanotech_attached_glow_count = 0;
     nanotech_detached_glow_count = 0;
     nanotech_visual_draw_count = 0;
+    nanotech_probe_counts.fill(0);
+    nanotech_probe_primary_slot = 0;
+    nanotech_probe_primary_ptr = 0;
+    nanotech_probe_primary_class = -1;
     kalebo_wall_ribbon_refresh_count = 0;
     fleet_laser_draw_count = 0;
     fleet_backdrop_draw_count = 0;
@@ -355,6 +387,10 @@ void load(openrac::Mod& mod) {
     nanotech_first_particle_refresh_logged = false;
     nanotech_first_detached_refresh_logged = false;
     nanotech_missing_primary_warned = false;
+    nanotech_probe_counts.fill(0);
+    nanotech_probe_primary_slot = 0;
+    nanotech_probe_primary_ptr = 0;
+    nanotech_probe_primary_class = -1;
     paired_target_effect_hook = false;
     paired_target_first_effect_logged = false;
     paired_target_missing_clocks_warned = false;
@@ -648,13 +684,17 @@ void load(openrac::Mod& mod) {
                     }
                     drawable = pause_policy::can_draw_nanotech_orb(
                         state, pvars, owner, owner_class);
+                    std::uint32_t primary = 0;
+                    int primary_class = -1;
+                    bool primary_active = false;
                     if (state == 2 && drawable) {
                         primary_addr = game_mod->relocate(
                             pause_policy::nanotech_primary_moby_global(
                                 game_mod->version() == "pal"));
                         if (primary_addr != 0) {
-                            const auto primary = memory.read<std::uint32_t>(primary_addr);
-                            const int primary_class = is_moby_in_active_array(primary, array_base)
+                            primary = memory.read<std::uint32_t>(primary_addr);
+                            primary_active = is_moby_in_active_array(primary, array_base);
+                            primary_class = primary_active
                                 ? memory.read<std::int16_t>(primary + kMobyClass) : -1;
                             emit_detached = pause_policy::can_emit_detached_nanotech_glow(
                                 state, pvars, primary, primary_class);
@@ -662,6 +702,17 @@ void load(openrac::Mod& mod) {
                         if (!emit_detached && !nanotech_missing_primary_warned) {
                             game_mod->warn("Detached Nanotech primary pointer unavailable; using safe orb draw-only fallback");
                             nanotech_missing_primary_warned = true;
+                        }
+                    }
+                    if (diagnostic_log) {
+                        const auto probe = pause_policy::nanotech_pause_probe(
+                            drawable, state, emit_attached, primary_addr, primary,
+                            primary_active, primary_class);
+                        ++nanotech_probe_counts[static_cast<std::size_t>(probe)];
+                        if (state == 2 && drawable) {
+                            nanotech_probe_primary_slot = primary_addr;
+                            nanotech_probe_primary_ptr = primary;
+                            nanotech_probe_primary_class = primary_class;
                         }
                     }
                 }
