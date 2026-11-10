@@ -410,6 +410,19 @@ int main() {
     assert(vendor_ring_scale == 2.35f);
     assert(vendor_matrix_rebuilds == 1);
 
+    // MobyBuildMatrix is a shared overlay function whose guest address moves
+    // with the loaded level. Veldin Orbit (17) must never call level 00's
+    // address; doing so produces an OpenRAC "no function of the port" error.
+    assert(vendor_matrix_rebuild_code_address(false, 0) == 0x00250DF8u);
+    assert(vendor_matrix_rebuild_code_address(false, 16) == 0x0024C4D0u);
+    assert(vendor_matrix_rebuild_code_address(false, 17) == 0x0024B5B0u);
+    assert(vendor_matrix_rebuild_code_address(false, 18) == 0x002530E0u);
+    assert(vendor_matrix_rebuild_code_address(true, 0) == 0x00251E30u);
+    assert(vendor_matrix_rebuild_code_address(true, 17) == 0x0024C660u);
+    assert(vendor_matrix_rebuild_code_address(true, 18) == 0x002540A8u);
+    assert(vendor_matrix_rebuild_code_address(false, -1) == 0u);
+    assert(vendor_matrix_rebuild_code_address(true, 19) == 0u);
+
     int vendor_updates = 0;
     int vendor_draws = 0;
     dispatch_vendor_update(true, true,

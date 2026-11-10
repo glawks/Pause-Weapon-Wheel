@@ -417,6 +417,32 @@ void with_vendor_ring_pose_held(Read read, Write write,
     restore();
 }
 
+// The game's MobyBuildMatrix routine is shared across overlays, but its
+// *guest address* changes for every level. Never pass a level-00 address to
+// function_at() while another overlay is loaded: it can return a callable
+// proxy that logs "no function of the port" when invoked. NTSC-U addresses
+// are from Lombyte's US shared-function map (FUN_L00_00250df8); PAL addresses
+// are from rac1-decomp's PAL overlay map (func_L00_00251E30).
+constexpr std::uint32_t vendor_matrix_rebuild_code_address(bool pal, int level) {
+    constexpr std::array<std::uint32_t, 19> ntsc = {
+        0x00250DF8u, 0x00265BD8u, 0x00253468u, 0x0023F968u, 0x00243B30u,
+        0x0027B060u, 0x0025FAB8u, 0x00279820u, 0x0025B2F8u, 0x00270780u,
+        0x00243870u, 0x00276C28u, 0x00269B38u, 0x0025CA80u, 0x002592F8u,
+        0x00240460u, 0x0024C4D0u, 0x0024B5B0u, 0x002530E0u
+    };
+    constexpr std::array<std::uint32_t, 19> pal_addresses = {
+        0x00251E30u, 0x00266B88u, 0x00254440u, 0x00240908u, 0x00244AE8u,
+        0x0027C090u, 0x00260AC0u, 0x0027A7D8u, 0x0025C2A8u, 0x002716B8u,
+        0x00244828u, 0x00277BD0u, 0x0026AAF0u, 0x0025DA38u, 0x0025A330u,
+        0x00241428u, 0x0024D470u, 0x0024C660u, 0x002540A8u
+    };
+    if (level < 0 || level >= static_cast<int>(ntsc.size())) {
+        return 0;
+    }
+    return pal ? pal_addresses[static_cast<std::size_t>(level)]
+               : ntsc[static_cast<std::size_t>(level)];
+}
+
 // These are guest code addresses of draw_vendor_effects, not native host
 // pointers. NTSC-U's counterpart is verified in OpenRAC's carried source.
 constexpr std::uint32_t vendor_effect_code_address(bool pal) {

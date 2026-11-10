@@ -33,9 +33,6 @@ constexpr openrac::gaddr kVendorRingBQuaternion = 0x60u;
 // visual update keeps the original vendor's proximity branch inactive.
 constexpr openrac::gaddr kPalLevelFrameCounter = 0x0015F6B0u;
 constexpr openrac::gaddr kNtscLevelFrameCounter = 0x0015F5CCu;
-// Game moby matrix builder (OpenRAC RAC1 decomp version maps, shared level).
-constexpr openrac::gaddr kPalBuildMobyMatrix = 0x00250A08u;
-constexpr openrac::gaddr kNtscBuildMobyMatrix = 0x00250DF8u;
 constexpr openrac::gaddr kNanotechOwnerPtr = 0x0Cu;
 constexpr openrac::gaddr kNanotechBobOffset = 0x00u;
 constexpr openrac::gaddr kNanotechBobPhase = 0x04u;
@@ -668,8 +665,11 @@ void load(openrac::Mod& mod) {
 
                         const auto counter_address = game_mod->relocate(
                             pal ? kPalLevelFrameCounter : kNtscLevelFrameCounter);
-                        const auto rebuild = game_mod->function_at<GameBuildMobyMatrixFn>(
-                            pal ? kPalBuildMobyMatrix : kNtscBuildMobyMatrix);
+                        const auto rebuild_address =
+                            pause_policy::vendor_matrix_rebuild_code_address(
+                                pal, game_mod->loaded_level());
+                        const auto rebuild = rebuild_address == 0 ? nullptr
+                            : game_mod->function_at<GameBuildMobyMatrixFn>(rebuild_address);
                         if (counter_address != 0 && rebuild != nullptr) {
                             // The original state-1 path queues the real draw
                             // and refreshes its matrix. Its state-2 shop
