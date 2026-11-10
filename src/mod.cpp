@@ -97,6 +97,9 @@ bool fleet_backdrop_missing_draw_warned = false;
 bool veldin_final_barrier_draw_hook = false;
 bool veldin_final_barrier_first_draw_logged = false;
 bool veldin_final_barrier_missing_draw_warned = false;
+bool veldin_final_lift_draw_hook = false;
+bool veldin_final_lift_first_draw_logged = false;
+bool veldin_final_lift_missing_draw_warned = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
 pause_policy::VendorBrightnessHold vendor_brightness;
 bool freeze_animations = true;
@@ -130,6 +133,7 @@ int kalebo_wall_ribbon_refresh_count = 0;
 int fleet_laser_draw_count = 0;
 int fleet_backdrop_draw_count = 0;
 int veldin_final_barrier_draw_count = 0;
+int veldin_final_lift_draw_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -162,7 +166,8 @@ void report_pause_diagnostics() {
                        + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count)
                        + ", fleet_laser=" + std::to_string(fleet_laser_draw_count)
                        + ", fleet_backdrop=" + std::to_string(fleet_backdrop_draw_count)
-                       + ", veldin_final_barrier=" + std::to_string(veldin_final_barrier_draw_count));
+                       + ", veldin_final_barrier=" + std::to_string(veldin_final_barrier_draw_count)
+                       + ", veldin_final_lift=" + std::to_string(veldin_final_lift_draw_count));
         const auto count = [](pause_policy::NanotechPauseProbe category) {
             return nanotech_probe_counts[static_cast<std::size_t>(category)];
         };
@@ -203,6 +208,7 @@ void report_pause_diagnostics() {
     fleet_laser_draw_count = 0;
     fleet_backdrop_draw_count = 0;
     veldin_final_barrier_draw_count = 0;
+    veldin_final_lift_draw_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -327,11 +333,14 @@ int gate_moby_update(void*, int slot, int phase) {
         wheel_active, keep_water, world_gate, fleet_backdrop_draw_hook, level, oclass);
     const bool veldin_final_barrier_draw_only = pause_policy::should_route_veldin_final_barrier_draw(
         wheel_active, keep_water, world_gate, veldin_final_barrier_draw_hook, level, oclass);
+    const bool veldin_final_lift_draw_only = pause_policy::should_route_veldin_final_lift_draw(
+        wheel_active, keep_water, world_gate, veldin_final_lift_draw_hook, level, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
                        || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
                        || kalebo_wall_ribbons || fleet_laser_draw_only
                        || fleet_backdrop_draw_only || veldin_final_barrier_draw_only
+                       || veldin_final_lift_draw_only
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
@@ -343,7 +352,7 @@ int gate_moby_update(void*, int slot, int phase) {
         // the yellow link particles with its motion clocks stopped.
         if (vendor_draw_only || nanotech_draw_only || paired_target_effects
             || kalebo_wall_ribbons || fleet_laser_draw_only || fleet_backdrop_draw_only
-            || veldin_final_barrier_draw_only) {
+            || veldin_final_barrier_draw_only || veldin_final_lift_draw_only) {
             // The visible moby animation can advance earlier in the game
             // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
@@ -405,6 +414,9 @@ void load(openrac::Mod& mod) {
     veldin_final_barrier_draw_hook = false;
     veldin_final_barrier_first_draw_logged = false;
     veldin_final_barrier_missing_draw_warned = false;
+    veldin_final_lift_draw_hook = false;
+    veldin_final_lift_first_draw_logged = false;
+    veldin_final_lift_missing_draw_warned = false;
     vendor_phases.reset();
     vendor_brightness.reset();
     flagged_mobys.clear();
@@ -1099,6 +1111,63 @@ void load(openrac::Mod& mod) {
         mod.info("Final Veldin class-1392 Trespasser barrier draw-only hook registered");
     } catch (const openrac::Error&) {
         mod.warn("Final Veldin class-1392 hook unavailable; green barrier remains paused");
+    }
+
+    // Final Veldin's class-1402 lift also renders the large textured shaft
+    // meshes. The normal update moves the lift and linked scenery, updates
+    // commands and scrolls one mesh's UVs, so never execute it mid-pause.
+    // Its pvars+0x14 selector chooses one of three game draw callbacks.
+    try {
+        mod.hook<openrac::rac1::Moby_Class1402_Update>(
+            [](auto original, std::uint32_t moby) {
+                if (!wheel_active || !world_gate) {
+                    original(moby);
+                    return;
+                }
+                if (moby == 0) {
+                    return;
+                }
+                auto memory = game_mod->memory();
+                const auto oclass = memory.read<std::int16_t>(moby + kMobyClass);
+                if (!pause_policy::should_route_veldin_final_lift_draw(
+                        wheel_active, keep_water, world_gate, veldin_final_lift_draw_hook,
+                        game_mod->loaded_level(), oclass)) {
+                    return;
+                }
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                if (pvars == 0) {
+                    return;
+                }
+                const auto mesh_mode = memory.read<std::int32_t>(pvars + 0x14u);
+                if (!pause_policy::can_draw_veldin_final_lift(state, pvars, mesh_mode)) {
+                    return;
+                }
+
+                const bool pal = game_mod->version() == "pal";
+                const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                    pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                    pause_policy::veldin_final_lift_draw_code_address(pal, mesh_mode));
+                if (add == nullptr || draw == nullptr) {
+                    if (!veldin_final_lift_missing_draw_warned) {
+                        game_mod->warn("Final Veldin shaft mesh callback unavailable; lift stays frozen");
+                        veldin_final_lift_missing_draw_warned = true;
+                    }
+                    return;
+                }
+                pause_policy::enqueue_veldin_final_lift(pal, mesh_mode, moby, add);
+                ++veldin_final_lift_draw_count;
+                if (!veldin_final_lift_first_draw_logged) {
+                    game_mod->info("Final Veldin class-1402 shaft mesh drawn with lift movement paused (mode="
+                                   + std::to_string(mesh_mode) + ")");
+                    veldin_final_lift_first_draw_logged = true;
+                }
+            });
+        veldin_final_lift_draw_hook = true;
+        mod.info("Final Veldin class-1402 lift/shaft draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Final Veldin class-1402 hook unavailable; shaft mesh remains paused");
     }
 
     try {

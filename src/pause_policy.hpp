@@ -153,6 +153,47 @@ void enqueue_veldin_final_barrier(bool pal, std::uint32_t moby, Enqueue enqueue)
     enqueue(veldin_final_barrier_draw_code_address(pal), moby);
 }
 
+// Final Veldin's class-1402 lift/shaft renders three different textured
+// meshes. Its normal update also moves the lift and linked mobys, changes
+// commands and advances the texture's scroll offset. Queue only the existing
+// mesh renderer while the world is paused; never allow the gameplay update.
+constexpr bool should_route_veldin_final_lift_draw(bool wheel_active,
+                                                   bool keep_scenery, bool world_gate,
+                                                   bool draw_hook_installed,
+                                                   int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 18 && oclass == 1402;
+}
+
+// States 2/3 have selected an initial height. State 0 has not initialized
+// the lift, while state 1 has not yet chosen a position for its mesh.
+constexpr bool can_draw_veldin_final_lift(std::uint8_t state, std::uint32_t pvars,
+                                         std::int32_t mesh_mode) {
+    return (state == 2 || state == 3) && pvars != 0
+           && mesh_mode >= 0 && mesh_mode <= 2;
+}
+
+// Guest code addresses verified against NTSC-U Lombyte and PAL RAC1 decomp.
+// Mode is the selector at lift pvars+0x14; modes 0/1/2 draw 25/38/22 quads.
+constexpr std::uint32_t veldin_final_lift_draw_code_address(bool pal,
+                                                            std::int32_t mesh_mode) {
+    switch (mesh_mode) {
+    case 0: return pal ? 0x002F3A80u : 0x002F2620u;
+    case 1: return pal ? 0x002F3C28u : 0x002F27C8u;
+    case 2: return pal ? 0x002F3DD0u : 0x002F2970u;
+    default: return 0u;
+    }
+}
+
+template <typename Enqueue>
+void enqueue_veldin_final_lift(bool pal, std::int32_t mesh_mode,
+                               std::uint32_t moby, Enqueue enqueue) {
+    const auto callback = veldin_final_lift_draw_code_address(pal, mesh_mode);
+    if (callback != 0u) {
+        enqueue(callback, moby);
+    }
+}
+
 // Quartu's electric-water moby (655) both draws lightning and damages the
 // hero. Route it through a draw-only hook while Quick Select is held, never
 // through the regular scenery allowlist above. Other levels stay untouched.

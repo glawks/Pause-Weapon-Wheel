@@ -8,8 +8,9 @@
 > The detached Nanotech glow is still awaiting confirmation after a new
 > NTSC-U primary-pointer and per-level draw-address correction. The branch
 > logs extra read-only diagnostics for the detached safety gate.
-> Veldin Orbit's corridor lasers and distant fleet beam/impact
-> glow, and final Veldin's green security barriers await in-game confirmation.
+> Veldin Orbit's corridor lasers and distant fleet beam/impact glow await
+> confirmation. Final Veldin's green security barriers are confirmed in-game;
+> its class-1402 shaft/water-like textured mesh is undergoing a new test.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -28,9 +29,10 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Kalebo III's purple doorway wall visible (testing).** Refresh the active linked-pair ribbon renderer while its switch and surrounding world-object updates remain paused. Confirmed in-game on NTSC-U.
 - **Keep Veldin Orbit's red laser beams visible (testing).** Requeue the previously initialized beam quads without running the class-99 motion or hit-detection update. Awaiting in-game confirmation.
 - **Keep Veldin Orbit's distant fleet beam and planet impact visible (testing).** Requeue class 1772's original backdrop renderer, which draws the blue-white beam and purple impact glow, without running the scenery controller's update. Awaiting in-game confirmation.
-- **Keep the final Veldin's green security barriers visible (testing).** Requeue class 1392's active-state glow quads without running the linked Trespasser-pad, sound or collision update. Awaiting in-game confirmation.
+- **Keep the final Veldin's green security barriers visible (testing).** Requeue class 1392's active-state glow quads without running the linked Trespasser-pad, sound or collision update. Confirmed in-game on NTSC-U.
+- **Keep the final Veldin's shaft meshes visible (testing).** Requeue one of class 1402's three textured lift/shaft renderers without advancing the lift or linked scenery. Candidate fix for the missing water-like shaft effect; awaiting in-game confirmation.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
-- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor, Nanotech, Kalebo wall-ribbon, Veldin Orbit laser, fleet-backdrop and final Veldin barrier visual refreshes when Quick Select closes. The `testing` branch also separates attached/detached Nanotech fallback reasons and records the sampled primary pointer.
+- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor, Nanotech, Kalebo wall-ribbon, Veldin Orbit laser, fleet-backdrop, final Veldin barrier and shaft-mesh visual refreshes when Quick Select closes. The `testing` branch also separates attached/detached Nanotech fallback reasons and records the sampled primary pointer.
 
 ### Verified scenery fixes
 
@@ -103,7 +105,8 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - Kalebo III's class-552 linked-pair ribbons were **confirmed visible in-game**. Their active-state refresh also maintains ambient wall audio, which may continue while the wheel is held; the wall switch and unrelated mobys are still paused.
 - Veldin Orbit's class-99 laser beam draw-only path is **not yet verified in-game**. The renderer uses the most recently calculated beam endpoints and width, which will remain stationary during Quick Select; the normal movement, particle spraying and hit detection stay blocked. This may omit some moving sparks while preserving the main red beam quads.
 - Veldin Orbit's class-1772 fleet backdrop draw-only path is **not yet verified in-game**. It preserves the precomputed beam endpoint and glow parameters, avoiding the controller's gameplay-affecting updates. Its draw callback may still scroll beam-texture UVs slightly while paused.
-- Final Veldin's class-1392 green-barrier draw-only path is **not yet verified in-game**. It reuses initialized glow parameters without processing the linked puzzle or collision state. The glow's own scrolling UV phase can still advance a little while paused.
+- Final Veldin's class-1392 green-barrier draw-only path was **confirmed in-game on NTSC-U**. It reuses initialized glow parameters without processing the linked puzzle or collision state. The glow's own scrolling UV phase can still advance a little while paused.
+- Final Veldin's class-1402 lift/shaft draw-only path is **not yet verified in-game**. The decompiled update submits a 25-, 38- or 22-quad renderer chosen by the lift's mesh selector, but also changes lift height, linked mobys and commands. The test branch redraws initialized meshes with those updates frozen. It is a candidate for the water-like surface missing in the level-18 shaft, not a confirmed water controller; mesh UV scrolling also stops while paused.
 
 ## Technical notes
 
@@ -124,6 +127,8 @@ Veldin Orbit (Drek's Fleet, level `17`) uses class `99` for red scanning laser b
 The *distant* blue-white fleet beam and the pink-purple explosion against the planet are a separate class `1772` (`FleetReflectionUpdate`) effect. Its original draw callback, `draw_fleet_backdrop_quads`, emits two textured beam quads and five impact-glow quads. The testing branch enqueues this renderer using the guest address `0x002F4E30` (PAL) or `0x002F32F0` (NTSC-U), only after the controller reaches initialized state `1`; its normal update (which can change the hero fall state) remains paused.
 
 The green security lasers on the **final Veldin** (level `18`) are class `1392` (`trespasser_barrier_update`), distinct from both Veldin Orbit effects. In state `1` its original update queues `draw_trespasser_barrier_quads`, while also checking the linked Trespasser pad and potentially changing collision and sound. The testing branch queues the 12 glow quads without that state update via guest address `0x002F33D8` (PAL) or `0x002F1FD8` (NTSC-U). The state-0 setup and state-2 fade-out remain paused.
+
+Final Veldin also has a class-`1402` lift that queues one of three 3D textured-quad meshes from `lift_update`. The test draw-only hook uses the initialized pvars mesh selector at offset `0x14`: NTSC-U callbacks `0x002F2620`, `0x002F27C8`, `0x002F2970` (PAL: `0x002F3A80`, `0x002F3C28`, `0x002F3DD0`). It holds the lift's position/commands and its shared UV scroll clock while queuing the original renderer. The `veldin_final_lift` diagnostic count shows whether this path actually runs during the weapon-wheel pause; an in-game result is still needed to establish whether this is the missing water-like surface.
 
 Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
 

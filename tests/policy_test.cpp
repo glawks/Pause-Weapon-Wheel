@@ -201,6 +201,41 @@ int main() {
     assert(final_barrier_callback == 0x002F1FD8u);
     assert(final_barrier_target == 0x123456u);
 
+    // Final Veldin's class-1402 shaft/lift uses three textured meshes.
+    // Preserve the selected draw callback while its height/command logic
+    // remains frozen; never run the full update just to draw the surface.
+    assert(should_route_veldin_final_lift_draw(true, true, true, true, 18, 1402));
+    assert(!should_route_veldin_final_lift_draw(false, true, true, true, 18, 1402));
+    assert(!should_route_veldin_final_lift_draw(true, false, true, true, 18, 1402));
+    assert(!should_route_veldin_final_lift_draw(true, true, false, true, 18, 1402));
+    assert(!should_route_veldin_final_lift_draw(true, true, true, false, 18, 1402));
+    assert(!should_route_veldin_final_lift_draw(true, true, true, true, 17, 1402));
+    assert(!should_route_veldin_final_lift_draw(true, true, true, true, 18, 1392));
+    assert(can_draw_veldin_final_lift(2, 0x1000u, 0));
+    assert(can_draw_veldin_final_lift(3, 0x1000u, 1));
+    assert(can_draw_veldin_final_lift(2, 0x1000u, 2));
+    assert(!can_draw_veldin_final_lift(0, 0x1000u, 0));
+    assert(!can_draw_veldin_final_lift(1, 0x1000u, 0));
+    assert(!can_draw_veldin_final_lift(2, 0u, 0));
+    assert(!can_draw_veldin_final_lift(2, 0x1000u, -1));
+    assert(!can_draw_veldin_final_lift(2, 0x1000u, 3));
+    assert(veldin_final_lift_draw_code_address(false, 0) == 0x002F2620u);
+    assert(veldin_final_lift_draw_code_address(false, 1) == 0x002F27C8u);
+    assert(veldin_final_lift_draw_code_address(false, 2) == 0x002F2970u);
+    assert(veldin_final_lift_draw_code_address(true, 0) == 0x002F3A80u);
+    assert(veldin_final_lift_draw_code_address(true, 1) == 0x002F3C28u);
+    assert(veldin_final_lift_draw_code_address(true, 2) == 0x002F3DD0u);
+    assert(veldin_final_lift_draw_code_address(true, 3) == 0u);
+    std::uint32_t final_lift_callback = 0;
+    std::uint32_t final_lift_target = 0;
+    enqueue_veldin_final_lift(false, 1, 0x654321u,
+                              [&](std::uint32_t fn, std::uint32_t target) {
+                                  final_lift_callback = fn;
+                                  final_lift_target = target;
+                              });
+    assert(final_lift_callback == 0x002F27C8u);
+    assert(final_lift_target == 0x654321u);
+
     // Use only an initialized, active bolt. Ignore dormant hazards and
     // missing/deallocated effect storage rather than drawing garbage.
     assert(can_draw_quartu_electric_arc(1, 0x1000, 0));
