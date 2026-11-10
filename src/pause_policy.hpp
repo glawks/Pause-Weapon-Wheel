@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace pause_policy {
@@ -270,12 +271,13 @@ constexpr bool should_route_nanotech_draw(bool wheel_active, bool keep_scenery,
            && oclass == 806;
 }
 
-// State 0 is uninitialized; states 3/4 are collecting/finished. The draw
-// renderer reads the owner matrix even after the crate breaks (state 2).
+// State 0 is uninitialized; states 3/4 are collecting/finished. Once an orb
+// detaches in state 2, its own pvars are sufficient for the renderer even
+// if the destroyed crate has been removed from the active moby array.
 constexpr bool can_draw_nanotech_orb(std::uint8_t state, std::uint32_t pvars,
                                     std::uint32_t owner, int owner_oclass) {
-    return (state == 1 || state == 2) && pvars != 0 && owner != 0
-           && owner_oclass == 501;
+    return pvars != 0 && (state == 2 || (state == 1 && owner != 0
+                                        && owner_oclass == 501));
 }
 
 // Attached to a live crate (state 1), the retail update follows the crate
@@ -289,6 +291,46 @@ constexpr bool can_emit_attached_nanotech_glow(std::uint8_t state,
                                                std::uint8_t owner_state) {
     return state == 1 && pvars != 0 && owner != 0
            && owner_oclass == 501 && owner_state < 0x80;
+}
+
+// State 2 contains the same orb/particle renderer as state 1, but also a
+// health-pickup branch. Only refresh it after the primary orb pointer has
+// been validated so that pointer can be masked for the scoped update.
+constexpr bool can_emit_detached_nanotech_glow(std::uint8_t state,
+                                               std::uint32_t pvars,
+                                               std::uint32_t primary,
+                                               int primary_class) {
+    return state == 2 && pvars != 0 && primary != 0 && primary_class == 806;
+}
+
+// Keep all temporary guest-memory changes scoped to one original update,
+// including an exception from the original (which must never leave the
+// primary-orb pointer cleared or the orb in a moved position).
+template <std::size_t N, typename Read, typename Write, typename Update>
+void with_restored_guest_words(const std::array<std::uint32_t, N>& addresses,
+                               Read read, Write write, Update update) {
+    std::array<std::uint32_t, N> saved{};
+    for (std::size_t i = 0; i < N; ++i) {
+        saved[i] = read(addresses[i]);
+    }
+    const auto restore = [&] {
+        for (std::size_t i = 0; i < N; ++i) {
+            write(addresses[i], saved[i]);
+        }
+    };
+    try {
+        update();
+    } catch (...) {
+        restore();
+        throw;
+    }
+    restore();
+}
+
+// PAL is from the decomp's primary_nanotech_ball_moby definition;
+// NTSC-U is the corresponding level-global offset in the same data block.
+constexpr std::uint32_t nanotech_primary_moby_global(bool pal) {
+    return pal ? 0x0015F71Cu : 0x0015F63Cu;
 }
 
 template <typename Original, typename Draw, typename Emit>

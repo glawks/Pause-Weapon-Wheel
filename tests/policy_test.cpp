@@ -1,5 +1,6 @@
 #include "pause_policy.hpp"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <stdexcept>
@@ -284,6 +285,10 @@ int main() {
     assert(!can_draw_nanotech_orb(4, 0x1000u, 0x2000u, 501));
     assert(!can_draw_nanotech_orb(1, 0, 0x2000u, 501));
     assert(!can_draw_nanotech_orb(1, 0x1000u, 0, 501));
+    // Detached Nanotech orbs retain their own draw/particle state after
+    // the destroyed crate's moby slot is recycled.
+    assert(can_draw_nanotech_orb(2, 0x1000u, 0, 0));
+    assert(!can_draw_nanotech_orb(2, 0, 0, 0));
     assert(!can_draw_nanotech_orb(1, 0x1000u, 0x2000u, 502));
     assert(can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 501, 1));
     assert(!can_emit_attached_nanotech_glow(2, 0x1000u, 0x2000u, 501, 1));
@@ -291,6 +296,46 @@ int main() {
     assert(!can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 501, 0x80));
     assert(!can_emit_attached_nanotech_glow(1, 0, 0x2000u, 501, 1));
     assert(!can_emit_attached_nanotech_glow(1, 0x1000u, 0x2000u, 502, 1));
+
+    // A detached orb can emit the missing bright halo only with the
+    // game's initialized primary-orb pointer available for safe masking.
+    assert(can_emit_detached_nanotech_glow(2, 0x1000u, 0x2000u, 806));
+    assert(!can_emit_detached_nanotech_glow(1, 0x1000u, 0x2000u, 806));
+    assert(!can_emit_detached_nanotech_glow(3, 0x1000u, 0x2000u, 806));
+    assert(!can_emit_detached_nanotech_glow(2, 0, 0x2000u, 806));
+    assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0, 806));
+    assert(!can_emit_detached_nanotech_glow(2, 0x1000u, 0x2000u, 501));
+
+    // Only temporarily mask collection and velocity: restore *every*
+    // captured guest word after the visual refresh, including exceptions.
+    std::array<std::uint32_t, 3> detached_words = {0x10u, 0x20u, 0x30u};
+    std::uint32_t detached_values[3] = {0xA000u, 0xBBBBu, 0xCCCCu};
+    const auto detached_read = [&](std::uint32_t address) {
+        return detached_values[(address >> 4) - 1u];
+    };
+    const auto detached_write = [&](std::uint32_t address, std::uint32_t value) {
+        detached_values[(address >> 4) - 1u] = value;
+    };
+    with_restored_guest_words(detached_words, detached_read, detached_write, [&] {
+        detached_write(0x10u, 0); // Suppress health collection through the primary pointer.
+        detached_write(0x20u, 0); // Hold the detached orb's falling speed.
+        detached_write(0x30u, 0xDDDDu); // Allow the original visual path to mutate state.
+        assert(detached_read(0x10u) == 0 && detached_read(0x20u) == 0);
+    });
+    assert(detached_values[0] == 0xA000u && detached_values[1] == 0xBBBBu
+           && detached_values[2] == 0xCCCCu);
+    bool detached_threw = false;
+    try {
+        with_restored_guest_words(detached_words, detached_read, detached_write, [&] {
+            detached_write(0x10u, 0);
+            detached_write(0x30u, 0);
+            throw std::runtime_error("simulated effect error");
+        });
+    } catch (const std::runtime_error&) {
+        detached_threw = true;
+    }
+    assert(detached_threw && detached_values[0] == 0xA000u
+           && detached_values[2] == 0xCCCCu);
 
     int nanotech_updates = 0;
     int nanotech_draws = 0;

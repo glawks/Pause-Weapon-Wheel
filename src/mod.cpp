@@ -4,6 +4,7 @@
 #include "pause_policy.hpp"
 #include "pause_veil.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <set>
@@ -38,6 +39,7 @@ constexpr openrac::gaddr kNtscBuildMobyMatrix = 0x00250DF8u;
 constexpr openrac::gaddr kNanotechOwnerPtr = 0x0Cu;
 constexpr openrac::gaddr kNanotechBobOffset = 0x00u;
 constexpr openrac::gaddr kNanotechBobPhase = 0x04u;
+constexpr openrac::gaddr kNanotechGroundVelocity = 0x50u;
 constexpr openrac::gaddr kMobyYaw = 0x48u;
 constexpr openrac::gaddr kPairedTargetSteeringVelocity = 0x38u;
 
@@ -78,6 +80,8 @@ bool nanotech_first_draw_logged = false;
 bool nanotech_missing_draw_warned = false;
 bool nanotech_missing_clocks_warned = false;
 bool nanotech_first_particle_refresh_logged = false;
+bool nanotech_first_detached_refresh_logged = false;
+bool nanotech_missing_primary_warned = false;
 bool paired_target_effect_hook = false;
 bool paired_target_first_effect_logged = false;
 bool paired_target_missing_clocks_warned = false;
@@ -105,6 +109,7 @@ std::set<int> exempted_classes;
 int vendor_visual_draw_count = 0;
 int vendor_original_refresh_count = 0;
 int nanotech_attached_glow_count = 0;
+int nanotech_detached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
 int kalebo_wall_ribbon_refresh_count = 0;
 
@@ -134,6 +139,7 @@ void report_pause_diagnostics() {
                        + ", vendor_original_refresh="
                        + std::to_string(vendor_original_refresh_count)
                        + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
+                       + ", nanotech_detached_halo=" + std::to_string(nanotech_detached_glow_count)
                        + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count)
                        + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count));
     }
@@ -143,6 +149,7 @@ void report_pause_diagnostics() {
     vendor_visual_draw_count = 0;
     vendor_original_refresh_count = 0;
     nanotech_attached_glow_count = 0;
+    nanotech_detached_glow_count = 0;
     nanotech_visual_draw_count = 0;
     kalebo_wall_ribbon_refresh_count = 0;
 }
@@ -319,6 +326,8 @@ void load(openrac::Mod& mod) {
     nanotech_missing_draw_warned = false;
     nanotech_missing_clocks_warned = false;
     nanotech_first_particle_refresh_logged = false;
+    nanotech_first_detached_refresh_logged = false;
+    nanotech_missing_primary_warned = false;
     paired_target_effect_hook = false;
     paired_target_first_effect_logged = false;
     paired_target_missing_clocks_warned = false;
@@ -573,8 +582,10 @@ void load(openrac::Mod& mod) {
     // the particles that form its bright purple halo. While still attached
     // to a live crate (state 1), its original update cannot collect health;
     // run that update with motion clocks and bobbing frozen to renew the
-    // halo. Detached orbs (state 2) remain strictly draw-only, as their
-    // original update can home in on Ratchet and heal him.
+    // halo. State 2 needs the same particle update, but it can also move
+    // the orb and collect health. Mask the game's primary Nanotech pointer
+    // only for that scoped visual refresh (disabling the collection branch),
+    // and restore all position/physics values immediately afterward.
     try {
         mod.hook<openrac::rac1::Moby_NanotechBall_Update>(
             [](auto original, std::uint32_t moby) {
@@ -582,7 +593,9 @@ void load(openrac::Mod& mod) {
                     wheel_active, keep_water, world_gate, nanotech_draw_hook, 806);
                 bool drawable = false;
                 bool emit_attached = false;
+                bool emit_detached = false;
                 std::uint32_t pvars = 0;
+                std::uint32_t primary_addr = 0;
                 if (draw_only && moby != 0) {
                     auto memory = game_mod->memory();
                     const auto state = memory.read<std::uint8_t>(moby + kMobyState);
@@ -590,24 +603,42 @@ void load(openrac::Mod& mod) {
                     const auto owner = pvars == 0 ? 0u
                         : memory.read<std::uint32_t>(pvars + kNanotechOwnerPtr);
                     const auto array_base = current_moby_array();
+                    int owner_class = -1;
                     if (is_moby_in_active_array(owner, array_base)) {
-                        const auto owner_class = memory.read<std::int16_t>(owner + kMobyClass);
-                        drawable = pause_policy::can_draw_nanotech_orb(
-                            state, pvars, owner, owner_class);
+                        owner_class = memory.read<std::int16_t>(owner + kMobyClass);
                         emit_attached = pause_policy::can_emit_attached_nanotech_glow(
                             state, pvars, owner, owner_class,
                             memory.read<std::uint8_t>(owner + kMobyState));
+                    }
+                    drawable = pause_policy::can_draw_nanotech_orb(
+                        state, pvars, owner, owner_class);
+                    if (state == 2 && drawable) {
+                        primary_addr = game_mod->relocate(
+                            pause_policy::nanotech_primary_moby_global(
+                                game_mod->version() == "pal"));
+                        if (primary_addr != 0) {
+                            const auto primary = memory.read<std::uint32_t>(primary_addr);
+                            const int primary_class = is_moby_in_active_array(primary, array_base)
+                                ? memory.read<std::int16_t>(primary + kMobyClass) : -1;
+                            emit_detached = pause_policy::can_emit_detached_nanotech_glow(
+                                state, pvars, primary, primary_class);
+                        }
+                        if (!emit_detached && !nanotech_missing_primary_warned) {
+                            game_mod->warn("Detached Nanotech primary pointer unavailable; using safe orb draw-only fallback");
+                            nanotech_missing_primary_warned = true;
+                        }
                     }
                 }
 
                 const auto clocks = pause_policy::paired_swingshot_motion_clock_addresses(
                     game_mod->version() == "pal");
-                const auto time_addr = emit_attached
+                const auto time_addr = (emit_attached || emit_detached)
                     ? game_mod->relocate(clocks.frame_time) : 0u;
-                const auto sq_addr = emit_attached
+                const auto sq_addr = (emit_attached || emit_detached)
                     ? game_mod->relocate(clocks.frame_time_squared) : 0u;
-                if (emit_attached && (time_addr == 0 || sq_addr == 0)) {
+                if ((emit_attached || emit_detached) && (time_addr == 0 || sq_addr == 0)) {
                     emit_attached = false;
+                    emit_detached = false;
                     if (!nanotech_missing_clocks_warned) {
                         game_mod->warn("Nanotech particle clocks unavailable; drawing orb without refreshing its halo");
                         nanotech_missing_clocks_warned = true;
@@ -615,7 +646,7 @@ void load(openrac::Mod& mod) {
                 }
 
                 pause_policy::dispatch_nanotech_visual_update(
-                    draw_only, drawable, emit_attached,
+                    draw_only, drawable, emit_attached || emit_detached,
                     [&] { original(moby); },
                     [&] {
                         const bool pal = game_mod->version() == "pal";
@@ -639,6 +670,47 @@ void load(openrac::Mod& mod) {
                     },
                     [&] {
                         auto memory = game_mod->memory();
+                        if (emit_detached) {
+                            // The retail state-2 update emits the missing
+                            // particles, but its pickup branch requires a
+                            // non-null primary Nanotech orb. Keep that guest
+                            // pointer zero only while calling original(),
+                            // restore the orb's own pose, grounding data and
+                            // bobbing, and prevent frame-based movement.
+                            const std::array<std::uint32_t, 18> held = {
+                                primary_addr,
+                                moby + 0x10u, moby + 0x14u, moby + 0x18u, moby + 0x1Cu,
+                                moby + kMobyState, moby + 0xBCu,
+                                pvars + 0x00u, pvars + 0x04u, pvars + 0x08u,
+                                pvars + 0x10u, pvars + 0x14u, pvars + 0x18u, pvars + 0x1Cu,
+                                pvars + kNanotechGroundVelocity,
+                                pvars + 0x70u, pvars + 0x74u, pvars + 0x78u
+                            };
+                            pause_policy::with_restored_guest_words(
+                                held,
+                                [&](std::uint32_t addr) {
+                                    return memory.read<std::uint32_t>(addr);
+                                },
+                                [&](std::uint32_t addr, std::uint32_t value) {
+                                    memory.write<std::uint32_t>(addr, value);
+                                },
+                                [&] {
+                                    memory.write<std::uint32_t>(primary_addr, 0u);
+                                    memory.write<float>(pvars + kNanotechGroundVelocity, 0.0f);
+                                    pause_policy::with_stopped_motion_clocks(
+                                        [&] { return memory.read<float>(time_addr); },
+                                        [&](float v) { memory.write<float>(time_addr, v); },
+                                        [&] { return memory.read<float>(sq_addr); },
+                                        [&](float v) { memory.write<float>(sq_addr, v); },
+                                        [&] { original(moby); });
+                                });
+                            ++nanotech_detached_glow_count;
+                            if (!nanotech_first_detached_refresh_logged) {
+                                game_mod->info("Detached Nanotech halo particles refreshed with pickup and motion suppressed");
+                                nanotech_first_detached_refresh_logged = true;
+                            }
+                            return;
+                        }
                         pause_policy::with_preserved_motion_pair(
                             [&] { return memory.read<float>(pvars + kNanotechBobOffset); },
                             [&](float value) {
@@ -664,7 +736,7 @@ void load(openrac::Mod& mod) {
                     });
             });
         nanotech_draw_hook = true;
-        mod.info("Nanotech attached-halo / detached draw-only hook registered (class 806)");
+        mod.info("Nanotech attached/detached halo hook registered with guarded pickup suppression (class 806)");
     } catch (const openrac::Error&) {
         mod.warn("Nanotech orb hook unavailable; health boxes stay paused without glow");
     }

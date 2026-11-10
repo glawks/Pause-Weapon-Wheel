@@ -4,7 +4,8 @@
 
 > The `testing` branch contains unreleased experiments. The paired Swingshot
 > connection, Nanotech halo, Gadgetron vendor beam and vendor sphere-size hold
-> are confirmed working in NTSC-U testing. Kalebo's doorway wall is next to test.
+> are confirmed working in NTSC-U testing. Kalebo's doorway wall and the
+> detached Nanotech glow are awaiting in-game confirmation.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -19,10 +20,10 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Hoven water still.** Stop its scrolling texture's frame-time advancement while retaining the draw callback.
 - **Keep Gadgetron vendor effects visible (testing).** Refresh the beam through the vendor's original non-interactive update, then restore its state, held ring rotation and original sphere scale. The glow is kept at full strength and its previous value restored after Quick Select closes.
 - **Keep yellow paired Swingshot targets glowing (testing).** Replenish the particle stream connecting the two yellow spheres while temporarily stopping the target's motion clocks.
-- **Keep Nanotech crate glows visible (testing).** Refresh the attached orb's purple particle halo with the orb's movement clocks and bobbing held; detached orbs remain strictly draw-only, without running health-collection logic.
+- **Keep Nanotech crate glows visible (testing).** Refresh the purple particle halo both inside intact crates and around detached orbs after a crate breaks. Both visual updates hold the orb's movement; detached orbs temporarily mask the pickup path so Ratchet cannot collect health during Quick Select.
 - **Keep Kalebo III's purple doorway wall visible (testing).** Refresh the active linked-pair ribbon renderer while its switch and surrounding world-object updates remain paused. Awaiting in-game confirmation.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
-- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor refreshes, Nanotech halo updates and Kalebo wall-ribbon refreshes when Quick Select closes.
+- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor refreshes, attached and detached Nanotech halo updates, and Kalebo wall-ribbon refreshes when Quick Select closes.
 
 ### Verified scenery fixes
 
@@ -91,7 +92,7 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - The background shading is not a true Gaussian blur. Disable it if it causes display issues.
 - The `testing` branch's vendor beam and sphere-size correction are confirmed visible in NTSC-U, using the original state-1 visual update with proximity checks disabled and the pre-pause scale restored. The internal ring angle counters still advance, although the ring's visible quaternion/matrix is restored while paused; it may snap to the advanced angle after unpausing. If the vendor was off when paused, its beam may appear brighter than its ordinary distance-based fade.
 - The yellow paired Swingshot target's connection was confirmed visible in the initial user test. Its short-lived particles may continue moving/fading as they are replenished; the target's own steering is held. This does **not** change Ratchet's grappling cable.
-- The Nanotech crate's attached purple halo was confirmed working in NTSC-U testing. Detached orbs remain draw-only to keep collection/healing paused; PAL behaviour remains unverified.
+- The Nanotech crate's attached purple halo was confirmed working in NTSC-U testing. The new detached-orb particle refresh has been code-checked but still **needs in-game verification**. If the primary-orb pointer cannot be validated, it uses the existing draw-only fallback to avoid risking health collection. PAL behaviour remains unverified.
 - Kalebo III's class-552 linked-pair ribbons have only been verified against the decompiled update logic, **not yet in-game**. Their active-state refresh also maintains ambient wall audio, which may continue while the wheel is held; the wall switch and unrelated mobys are still paused.
 
 ## Technical notes
@@ -102,7 +103,7 @@ Most water/scenery surfaces register a **draw callback each frame** from a moby 
 
 Quartu's electric-bolt callback uses the game's **32-bit code address**, rather than a native function pointer: `0x002D8710` on NTSC-U and `0x002D9B00` on PAL. The normal electric-water update—which can damage Ratchet—remains blocked during Quick Select.
 
-Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow draw callback is `0x002D9810` (NTSC-U) or `0x002DACC0` (PAL). The attached orb's state-1 update produces its short-lived halo particles and cannot heal Ratchet while the crate is alive; we run that path with motion clocks and bobbing held. The detached state-2 update can heal Ratchet and remains blocked during pause.
+Nanotech crates (class `501`) spawn a class `806` orb; the orb's original glow draw callback is `0x002D9810` (NTSC-U) or `0x002DACC0` (PAL). The attached orb's state-1 update produces its short-lived halo particles and cannot heal Ratchet while the crate is alive; we run that path with motion clocks and bobbing held. A detached orb (state `2`) emits the same halo, but its normal update also manages falling and health collection. The guarded testing path temporarily masks the level's primary Nanotech pointer (so the pickup condition is false), zeroes the motion clocks and falling velocity, calls the particle-producing update, then restores the primary pointer, position, bobbing, velocity and grounding state. This is isolated to state `2`; if the primary pointer is unavailable, it falls back to draw-only. Detached orbs continue emitting small short-lived particles while the wheel is held.
 
 Yellow paired Swingshot targets are class `803`. Their state-1 update emits the connection's particles rather than registering a dedicated draw callback. The experimental hook runs that update with its two movement clocks temporarily zeroed; class `758` targets remain frozen as before.
 
