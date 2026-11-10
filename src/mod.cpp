@@ -91,6 +91,9 @@ bool kalebo_wall_first_refresh_logged = false;
 bool fleet_laser_draw_hook = false;
 bool fleet_laser_first_draw_logged = false;
 bool fleet_laser_missing_draw_warned = false;
+bool fleet_backdrop_draw_hook = false;
+bool fleet_backdrop_first_draw_logged = false;
+bool fleet_backdrop_missing_draw_warned = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
 pause_policy::VendorBrightnessHold vendor_brightness;
 bool freeze_animations = true;
@@ -117,6 +120,7 @@ int nanotech_detached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
 int kalebo_wall_ribbon_refresh_count = 0;
 int fleet_laser_draw_count = 0;
+int fleet_backdrop_draw_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -147,7 +151,8 @@ void report_pause_diagnostics() {
                        + ", nanotech_detached_halo=" + std::to_string(nanotech_detached_glow_count)
                        + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count)
                        + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count)
-                       + ", fleet_laser=" + std::to_string(fleet_laser_draw_count));
+                       + ", fleet_laser=" + std::to_string(fleet_laser_draw_count)
+                       + ", fleet_backdrop=" + std::to_string(fleet_backdrop_draw_count));
     }
     observed_level = -1;
     observed_classes.clear();
@@ -159,6 +164,7 @@ void report_pause_diagnostics() {
     nanotech_visual_draw_count = 0;
     kalebo_wall_ribbon_refresh_count = 0;
     fleet_laser_draw_count = 0;
+    fleet_backdrop_draw_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -279,10 +285,13 @@ int gate_moby_update(void*, int slot, int phase) {
         level, oclass, state, flags);
     const bool fleet_laser_draw_only = pause_policy::should_route_fleet_laser_draw(
         wheel_active, keep_water, world_gate, fleet_laser_draw_hook, level, oclass);
+    const bool fleet_backdrop_draw_only = pause_policy::should_route_fleet_backdrop_draw(
+        wheel_active, keep_water, world_gate, fleet_backdrop_draw_hook, level, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
                        || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
                        || kalebo_wall_ribbons || fleet_laser_draw_only
+                       || fleet_backdrop_draw_only
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
@@ -293,7 +302,7 @@ int gate_moby_update(void*, int slot, int phase) {
         // Class 803 instead runs just enough of its effect update to emit
         // the yellow link particles with its motion clocks stopped.
         if (vendor_draw_only || nanotech_draw_only || paired_target_effects
-            || kalebo_wall_ribbons || fleet_laser_draw_only) {
+            || kalebo_wall_ribbons || fleet_laser_draw_only || fleet_backdrop_draw_only) {
             // The visible moby animation can advance earlier in the game
             // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
@@ -345,6 +354,9 @@ void load(openrac::Mod& mod) {
     fleet_laser_draw_hook = false;
     fleet_laser_first_draw_logged = false;
     fleet_laser_missing_draw_warned = false;
+    fleet_backdrop_draw_hook = false;
+    fleet_backdrop_first_draw_logged = false;
+    fleet_backdrop_missing_draw_warned = false;
     vendor_phases.reset();
     vendor_brightness.reset();
     flagged_mobys.clear();
@@ -913,6 +925,59 @@ void load(openrac::Mod& mod) {
         mod.info("Veldin Orbit class-99 laser draw-only hook registered");
     } catch (const openrac::Error&) {
         mod.warn("Veldin Orbit class-99 hook unavailable; lasers remain paused");
+    }
+
+    // Veldin Orbit's huge blue-white beam and purple impact glow are a
+    // separate distant-fleet backdrop renderer on class 1772. Its ordinary
+    // update also animates the quad phases and adjusts the hero fall state.
+    // During Quick Select, queue only its original rendering callback using
+    // the precomputed endpoints, with no gameplay or scene-state update.
+    try {
+        mod.hook<openrac::rac1::Moby_Class1772_Update>(
+            [](auto original, std::uint32_t moby) {
+                if (!wheel_active || !world_gate) {
+                    original(moby);
+                    return;
+                }
+                if (moby == 0) {
+                    return;
+                }
+                auto memory = game_mod->memory();
+                const auto oclass = memory.read<std::int16_t>(moby + kMobyClass);
+                if (!pause_policy::should_route_fleet_backdrop_draw(
+                        wheel_active, keep_water, world_gate, fleet_backdrop_draw_hook,
+                        game_mod->loaded_level(), oclass)) {
+                    return;
+                }
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                if (!pause_policy::can_draw_fleet_backdrop(state, pvars)) {
+                    return;
+                }
+
+                const bool pal = game_mod->version() == "pal";
+                const auto add = game_mod->function_at<GameAddDrawCallbackFn>(
+                    pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                    pause_policy::fleet_backdrop_draw_code_address(pal));
+                if (add == nullptr || draw == nullptr) {
+                    if (!fleet_backdrop_missing_draw_warned) {
+                        game_mod->warn("Veldin Orbit fleet-backdrop callback unavailable; scene update stays paused");
+                        fleet_backdrop_missing_draw_warned = true;
+                    }
+                    return;
+                }
+                pause_policy::enqueue_fleet_backdrop(pal, moby, add);
+                ++fleet_backdrop_draw_count;
+                if (!fleet_backdrop_first_draw_logged) {
+                    game_mod->info("Veldin Orbit distant beam and impact-glow quads drawn while fleet animation stays paused");
+                    fleet_backdrop_first_draw_logged = true;
+                }
+            });
+        fleet_backdrop_draw_hook = true;
+        mod.info("Veldin Orbit class-1772 fleet backdrop draw-only hook registered");
+    } catch (const openrac::Error&) {
+        mod.warn("Veldin Orbit class-1772 hook unavailable; distant beam remains paused");
     }
 
     try {

@@ -100,6 +100,34 @@ void enqueue_fleet_laser(bool pal, std::uint32_t moby, Enqueue enqueue) {
     enqueue(fleet_laser_draw_code_address(pal), moby);
 }
 
+// Drek's Fleet's distant blue-white beam and purple planet impact glow are
+// rendered by class 1772, not the separate class-99 corridor laser hazard.
+// Its ordinary update changes UV animation and may change the hero's fall
+// state, so draw from initialized pvars without running the gameplay update.
+constexpr bool should_route_fleet_backdrop_draw(bool wheel_active,
+                                                bool keep_scenery, bool world_gate,
+                                                bool draw_hook_installed,
+                                                int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 17 && oclass == 1772;
+}
+
+// State 0 still needs to calculate the anchor and distant endpoint.
+constexpr bool can_draw_fleet_backdrop(std::uint8_t state, std::uint32_t pvars) {
+    return state == 1 && pvars != 0;
+}
+
+// The original level-17 renderer draws both scrolling beam quads and all
+// five impact-glow quads. These are guest code addresses, not host pointers.
+constexpr std::uint32_t fleet_backdrop_draw_code_address(bool pal) {
+    return pal ? 0x002F4E30u : 0x002F32F0u;
+}
+
+template <typename Enqueue>
+void enqueue_fleet_backdrop(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(fleet_backdrop_draw_code_address(pal), moby);
+}
+
 // Quartu's electric-water moby (655) both draws lightning and damages the
 // hero. Route it through a draw-only hook while Quick Select is held, never
 // through the regular scenery allowlist above. Other levels stay untouched.

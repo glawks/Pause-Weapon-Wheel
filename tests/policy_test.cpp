@@ -149,6 +149,32 @@ int main() {
                         });
     assert(fleet_draw_callback == 0x002A95B8u && fleet_draw_target == 0x123456u);
 
+    // Veldin Orbit's distant blue-white fleet beam and purple impact glow
+    // are rendered by class 1772, separately from class-99 corridor lasers.
+    // The scenery controller initializes its endpoints in state 0; only
+    // its initialized state may enqueue the two beam and five glow quads.
+    assert(should_route_fleet_backdrop_draw(true, true, true, true, 17, 1772));
+    assert(!should_route_fleet_backdrop_draw(false, true, true, true, 17, 1772));
+    assert(!should_route_fleet_backdrop_draw(true, false, true, true, 17, 1772));
+    assert(!should_route_fleet_backdrop_draw(true, true, false, true, 17, 1772));
+    assert(!should_route_fleet_backdrop_draw(true, true, true, false, 17, 1772));
+    assert(!should_route_fleet_backdrop_draw(true, true, true, true, 16, 1772));
+    assert(!should_route_fleet_backdrop_draw(true, true, true, true, 17, 99));
+    assert(can_draw_fleet_backdrop(1, 0x1000u));
+    assert(!can_draw_fleet_backdrop(0, 0x1000u));
+    assert(!can_draw_fleet_backdrop(1, 0u));
+    assert(fleet_backdrop_draw_code_address(true) == 0x002F4E30u);
+    assert(fleet_backdrop_draw_code_address(false) == 0x002F32F0u);
+    std::uint32_t backdrop_draw_callback = 0;
+    std::uint32_t backdrop_draw_target = 0;
+    enqueue_fleet_backdrop(false, 0x123456u,
+                           [&](std::uint32_t fn, std::uint32_t target) {
+                               backdrop_draw_callback = fn;
+                               backdrop_draw_target = target;
+                           });
+    assert(backdrop_draw_callback == 0x002F32F0u);
+    assert(backdrop_draw_target == 0x123456u);
+
     // Use only an initialized, active bolt. Ignore dormant hazards and
     // missing/deallocated effect storage rather than drawing garbage.
     assert(can_draw_quartu_electric_arc(1, 0x1000, 0));

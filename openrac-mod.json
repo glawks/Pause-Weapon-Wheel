@@ -21,7 +21,8 @@
     "rac1.moby.nanotech_ball.update",
     "rac1.moby.hideable_flower.update",
     "rac1.moby.moby552.update",
-    "rac1.moby.moby99.update"
+    "rac1.moby.moby99.update",
+    "rac1.moby.fleet_reflection.update"
   ],
   "settings": [
     {
@@ -36,7 +37,7 @@
       "name": "Keep water and scenery drawing",
       "type": "bool",
       "default": true,
-      "description": "Preserve water, mud, ship glass and visual effects including vendor glow, Nanotech orbs, paired Swingshot particles, Kalebo doorway ribbons and Veldin Orbit lasers."
+      "description": "Preserve water, mud, ship glass and visual effects including vendor glow, Nanotech orbs, paired Swingshot particles, Kalebo doorway ribbons, Veldin Orbit lasers and the fleet backdrop."
     },
     {
       "key": "hold_hoven_scroll",
