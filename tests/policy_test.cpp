@@ -105,6 +105,20 @@ int main() {
     assert(!should_route_quartu_electric_draw(true, true, true, true, 17, 655));
     assert(!should_route_quartu_electric_draw(true, true, true, true, 15, 1565));
 
+    // Kalebo III's purple doorway wall is drawn by linked class-552 pairs.
+    // Only the initialized group leader in active state 1 may refresh its
+    // ribbon draw callback; avoid initialization and follower updates.
+    assert(should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(false, true, true, true, 16, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, false, true, true, 16, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, false, true, 16, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, false, 16, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 15, 552, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 546, 1, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 0, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 2, 0));
+    assert(!should_route_kalebo_wall_ribbons(true, true, true, true, 16, 552, 1, 2));
+
     // Use only an initialized, active bolt. Ignore dormant hazards and
     // missing/deallocated effect storage rather than drawing garbage.
     assert(can_draw_quartu_electric_arc(1, 0x1000, 0));

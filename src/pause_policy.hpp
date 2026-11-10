@@ -57,6 +57,20 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     }
 }
 
+// Kalebo III's purple horizontal doorway wall is a group of class-552
+// linked-pair ribbons. Its state-1 leader update registers the draw callback
+// and maintains sound; state 0 initializes/links mobys, so never run it
+// during a pause. Flag 0x2 marks linked followers, not group leaders.
+constexpr bool should_route_kalebo_wall_ribbons(bool wheel_active,
+                                                 bool keep_scenery, bool world_gate,
+                                                 bool effect_hook_installed,
+                                                 int level, int oclass,
+                                                 std::uint8_t state,
+                                                 std::uint16_t flags) {
+    return wheel_active && keep_scenery && world_gate && effect_hook_installed
+           && level == 16 && oclass == 552 && state == 1 && (flags & 0x2u) == 0;
+}
+
 // Quartu's electric-water moby (655) both draws lightning and damages the
 // hero. Route it through a draw-only hook while Quick Select is held, never
 // through the regular scenery allowlist above. Other levels stay untouched.

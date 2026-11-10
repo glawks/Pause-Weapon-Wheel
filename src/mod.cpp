@@ -81,6 +81,8 @@ bool nanotech_first_particle_refresh_logged = false;
 bool paired_target_effect_hook = false;
 bool paired_target_first_effect_logged = false;
 bool paired_target_missing_clocks_warned = false;
+bool kalebo_wall_ribbon_hook = false;
+bool kalebo_wall_first_refresh_logged = false;
 pause_policy::VendorVisualPhaseLock vendor_phases;
 pause_policy::VendorBrightnessHold vendor_brightness;
 bool freeze_animations = true;
@@ -104,6 +106,7 @@ int vendor_visual_draw_count = 0;
 int vendor_original_refresh_count = 0;
 int nanotech_attached_glow_count = 0;
 int nanotech_visual_draw_count = 0;
+int kalebo_wall_ribbon_refresh_count = 0;
 
 void log_class_list(const char* label, const std::set<int>& classes) {
     std::string line = std::string("pause diagnostic ") + label + ":";
@@ -131,7 +134,8 @@ void report_pause_diagnostics() {
                        + ", vendor_original_refresh="
                        + std::to_string(vendor_original_refresh_count)
                        + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
-                       + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count));
+                       + ", nanotech_draw_only=" + std::to_string(nanotech_visual_draw_count)
+                       + ", kalebo_wall=" + std::to_string(kalebo_wall_ribbon_refresh_count));
     }
     observed_level = -1;
     observed_classes.clear();
@@ -140,6 +144,7 @@ void report_pause_diagnostics() {
     vendor_original_refresh_count = 0;
     nanotech_attached_glow_count = 0;
     nanotech_visual_draw_count = 0;
+    kalebo_wall_ribbon_refresh_count = 0;
 }
 
 // OpenRAC 1.12 does not define openrac_overlay or Mod::on_overlay. Keep the
@@ -245,17 +250,23 @@ int gate_moby_update(void*, int slot, int phase) {
         }
         observed_classes.insert(oclass);
     }
-    const auto state = oclass == 803
+    const auto state = oclass == 803 || oclass == 552
         ? game_mod->memory().read<std::uint8_t>(moby + kMobyState) : 0u;
+    const auto flags = oclass == 552
+        ? game_mod->memory().read<std::uint16_t>(moby + kMobyFlags) : 0u;
     const bool nanotech_draw_only = pause_policy::should_route_nanotech_draw(
         wheel_active, keep_water, world_gate, nanotech_draw_hook, oclass);
     const bool paired_target_effects = pause_policy::should_route_paired_swingshot_glow(
         wheel_active, keep_water, world_gate, paired_target_effect_hook, oclass, state);
     const bool vendor_draw_only = pause_policy::should_route_vendor_draw(
         wheel_active, keep_water, world_gate, vendor_draw_hook, oclass);
+    const bool kalebo_wall_ribbons = pause_policy::should_route_kalebo_wall_ribbons(
+        wheel_active, keep_water, world_gate, kalebo_wall_ribbon_hook,
+        level, oclass, state, flags);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
                        || vendor_draw_only
                        || nanotech_draw_only || paired_target_effects
+                       || kalebo_wall_ribbons
                        || pause_policy::should_route_quartu_electric_draw(
                            wheel_active, keep_water, world_gate,
                            quartu_electric_draw_hook, level, oclass))) {
@@ -265,7 +276,8 @@ int gate_moby_update(void*, int slot, int phase) {
         // Class 655 and the class-806 health orb use draw-only hooks.
         // Class 803 instead runs just enough of its effect update to emit
         // the yellow link particles with its motion clocks stopped.
-        if (vendor_draw_only || nanotech_draw_only || paired_target_effects) {
+        if (vendor_draw_only || nanotech_draw_only || paired_target_effects
+            || kalebo_wall_ribbons) {
             // The visible moby animation can advance earlier in the game
             // loop. Always hold it even if general animation freeze is off.
             stop_animation(moby, array_base, level, oclass);
@@ -310,6 +322,8 @@ void load(openrac::Mod& mod) {
     paired_target_effect_hook = false;
     paired_target_first_effect_logged = false;
     paired_target_missing_clocks_warned = false;
+    kalebo_wall_ribbon_hook = false;
+    kalebo_wall_first_refresh_logged = false;
     vendor_phases.reset();
     vendor_brightness.reset();
     flagged_mobys.clear();
@@ -719,6 +733,48 @@ void load(openrac::Mod& mod) {
         mod.info("Paired Swingshot yellow-glow hook registered (class 803)");
     } catch (const openrac::Error&) {
         mod.warn("Paired Swingshot hook unavailable; yellow target particles remain paused");
+    }
+
+    // Kalebo III's doorway wall (class 552 / 0x228) is rendered by the
+    // linked-pair ribbons controller. The active group's state-1 update
+    // registers the four horizontal quads; the surrounding wall and switch
+    // logic remain gated. Never run its state-0 linking/initialization or
+    // follower updates during Quick Select.
+    try {
+        mod.hook<openrac::rac1::Moby_Class552_Update>(
+            [](auto original, std::uint32_t moby) {
+                if (!wheel_active || !world_gate) {
+                    original(moby);
+                    return;
+                }
+                if (moby == 0) {
+                    return;
+                }
+
+                auto memory = game_mod->memory();
+                const auto oclass = memory.read<std::int16_t>(moby + kMobyClass);
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const auto flags = memory.read<std::uint16_t>(moby + kMobyFlags);
+                if (!pause_policy::should_route_kalebo_wall_ribbons(
+                        wheel_active, keep_water, world_gate, kalebo_wall_ribbon_hook,
+                        game_mod->loaded_level(), oclass, state, flags)
+                    || memory.read<std::uint32_t>(moby + kMobyPvars) == 0) {
+                    return;
+                }
+
+                // State 1 does not advance motion/collision: it queues the
+                // ribbon draw callback and maintains its ambient audio.
+                original(moby);
+                ++kalebo_wall_ribbon_refresh_count;
+                if (!kalebo_wall_first_refresh_logged) {
+                    game_mod->info("Kalebo doorway wall ribbon draw refreshed while world is paused");
+                    kalebo_wall_first_refresh_logged = true;
+                }
+            });
+        kalebo_wall_ribbon_hook = true;
+        mod.info("Kalebo linked-pair ribbon wall hook registered (class 552)");
+    } catch (const openrac::Error&) {
+        mod.warn("Kalebo class 552 hook unavailable; doorway ribbons remain paused");
     }
 
     try {
