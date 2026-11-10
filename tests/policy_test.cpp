@@ -175,6 +175,32 @@ int main() {
     assert(backdrop_draw_callback == 0x002F32F0u);
     assert(backdrop_draw_target == 0x123456u);
 
+    // Final Veldin (level 18): class 1392's green Trespasser barrier must
+    // retain its glow quads without executing the pad-linked update that
+    // can switch the barrier off and alter collision or sound state.
+    assert(should_route_veldin_final_barrier_draw(true, true, true, true, 18, 1392));
+    assert(!should_route_veldin_final_barrier_draw(false, true, true, true, 18, 1392));
+    assert(!should_route_veldin_final_barrier_draw(true, false, true, true, 18, 1392));
+    assert(!should_route_veldin_final_barrier_draw(true, true, false, true, 18, 1392));
+    assert(!should_route_veldin_final_barrier_draw(true, true, true, false, 18, 1392));
+    assert(!should_route_veldin_final_barrier_draw(true, true, true, true, 17, 1392));
+    assert(!should_route_veldin_final_barrier_draw(true, true, true, true, 18, 1402));
+    assert(can_draw_veldin_final_barrier(1, 0x1000u));
+    assert(!can_draw_veldin_final_barrier(0, 0x1000u));
+    assert(!can_draw_veldin_final_barrier(2, 0x1000u));
+    assert(!can_draw_veldin_final_barrier(1, 0u));
+    assert(veldin_final_barrier_draw_code_address(true) == 0x002F33D8u);
+    assert(veldin_final_barrier_draw_code_address(false) == 0x002F1FD8u);
+    std::uint32_t final_barrier_callback = 0;
+    std::uint32_t final_barrier_target = 0;
+    enqueue_veldin_final_barrier(false, 0x123456u,
+                                 [&](std::uint32_t fn, std::uint32_t target) {
+                                     final_barrier_callback = fn;
+                                     final_barrier_target = target;
+                                 });
+    assert(final_barrier_callback == 0x002F1FD8u);
+    assert(final_barrier_target == 0x123456u);
+
     // Use only an initialized, active bolt. Ignore dormant hazards and
     // missing/deallocated effect storage rather than drawing garbage.
     assert(can_draw_quartu_electric_arc(1, 0x1000, 0));

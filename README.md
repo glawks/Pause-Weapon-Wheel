@@ -6,7 +6,8 @@
 > connection, Nanotech halo, Gadgetron vendor beam and vendor sphere-size hold
 > are confirmed working in NTSC-U testing. Kalebo's doorway wall and the
 > detached Nanotech glow, Veldin Orbit corridor lasers and distant fleet
-> beam/impact glow are awaiting in-game confirmation.
+> beam/impact glow, and final Veldin's green security barriers are awaiting
+> in-game confirmation.
 
 A configurable weapon-wheel pause mod for **OpenRAC's Ratchet & Clank 1 (RAC1)**. Holding Quick Select freezes Ratchet and ordinary world-object updates while keeping the weapon wheel responsive. The mod also preserves water, glass, lava, atmosphere and other scenery that would otherwise disappear when those updates are paused.
 
@@ -25,8 +26,9 @@ The visual fixes have been tested in-game on **NTSC-U** across the affected plan
 - **Keep Kalebo III's purple doorway wall visible (testing).** Refresh the active linked-pair ribbon renderer while its switch and surrounding world-object updates remain paused. Awaiting in-game confirmation.
 - **Keep Veldin Orbit's red laser beams visible (testing).** Requeue the previously initialized beam quads without running the class-99 motion or hit-detection update. Awaiting in-game confirmation.
 - **Keep Veldin Orbit's distant fleet beam and planet impact visible (testing).** Requeue class 1772's original backdrop renderer, which draws the blue-white beam and purple impact glow, without running the scenery controller's update. Awaiting in-game confirmation.
+- **Keep the final Veldin's green security barriers visible (testing).** Requeue class 1392's active-state glow quads without running the linked Trespasser-pad, sound or collision update. Awaiting in-game confirmation.
 - **Shade the background behind the wheel.** Adjustable 10–60% tint; this is a visual shade, **not** Gaussian blur.
-- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor, Nanotech, Kalebo wall-ribbon, Veldin Orbit laser and fleet-backdrop visual refreshes when Quick Select closes.
+- **Optional diagnostics.** Log observed moby classes and scenery exemptions, plus counts of vendor, Nanotech, Kalebo wall-ribbon, Veldin Orbit laser, fleet-backdrop and final Veldin barrier visual refreshes when Quick Select closes.
 
 ### Verified scenery fixes
 
@@ -99,6 +101,7 @@ The Windows workflow builds against the official **OpenRAC mod SDK 1.14.2** tag 
 - Kalebo III's class-552 linked-pair ribbons have only been verified against the decompiled update logic, **not yet in-game**. Their active-state refresh also maintains ambient wall audio, which may continue while the wheel is held; the wall switch and unrelated mobys are still paused.
 - Veldin Orbit's class-99 laser beam draw-only path is **not yet verified in-game**. The renderer uses the most recently calculated beam endpoints and width, which will remain stationary during Quick Select; the normal movement, particle spraying and hit detection stay blocked. This may omit some moving sparks while preserving the main red beam quads.
 - Veldin Orbit's class-1772 fleet backdrop draw-only path is **not yet verified in-game**. It preserves the precomputed beam endpoint and glow parameters, avoiding the controller's gameplay-affecting updates. Its draw callback may still scroll beam-texture UVs slightly while paused.
+- Final Veldin's class-1392 green-barrier draw-only path is **not yet verified in-game**. It reuses initialized glow parameters without processing the linked puzzle or collision state. The glow's own scrolling UV phase can still advance a little while paused.
 
 ## Technical notes
 
@@ -117,6 +120,8 @@ Kalebo III's purple doorway wall is made from class `552` (`0x228`) linked-pair 
 Veldin Orbit (Drek's Fleet, level `17`) uses class `99` for red scanning laser beams. Its full update both positions the beams and calls collision-hit routines, so the testing branch submits `draw_fleet_beam_quad` directly using the game callback addresses `0x002AA880` (PAL) or `0x002A95B8` (NTSC-U). This draws only initialized active beams and leaves the normal laser update frozen while the weapon wheel is open.
 
 The *distant* blue-white fleet beam and the pink-purple explosion against the planet are a separate class `1772` (`FleetReflectionUpdate`) effect. Its original draw callback, `draw_fleet_backdrop_quads`, emits two textured beam quads and five impact-glow quads. The testing branch enqueues this renderer using the guest address `0x002F4E30` (PAL) or `0x002F32F0` (NTSC-U), only after the controller reaches initialized state `1`; its normal update (which can change the hero fall state) remains paused.
+
+The green security lasers on the **final Veldin** (level `18`) are class `1392` (`trespasser_barrier_update`), distinct from both Veldin Orbit effects. In state `1` its original update queues `draw_trespasser_barrier_quads`, while also checking the linked Trespasser pad and potentially changing collision and sound. The testing branch queues the 12 glow quads without that state update via guest address `0x002F33D8` (PAL) or `0x002F1FD8` (NTSC-U). The state-0 setup and state-2 fade-out remain paused.
 
 Source references: [OpenRAC](https://github.com/OpenRAC/OpenRAC), [RAC1 electric-water decompilation](https://github.com/OpenRAC/rac1-decomp/blob/main/src/overlays/shared/electric_water.c) and [ripple-strip renderer](https://github.com/lombyte-project/Lombyte/blob/main/src/overlays/shared/props/ripple_strips.c).
 

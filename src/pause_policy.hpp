@@ -128,6 +128,31 @@ void enqueue_fleet_backdrop(bool pal, std::uint32_t moby, Enqueue enqueue) {
     enqueue(fleet_backdrop_draw_code_address(pal), moby);
 }
 
+// Final Veldin (level 18), not Veldin Orbit: class 1392 queues the green
+// Trespasser barrier's layered glow quads. Its normal update also checks a
+// linked pad and can change collision, state and sound; only keep its draw.
+constexpr bool should_route_veldin_final_barrier_draw(bool wheel_active,
+                                                      bool keep_scenery, bool world_gate,
+                                                      bool draw_hook_installed,
+                                                      int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 18 && oclass == 1392;
+}
+
+// State 0 initializes opacity; state 2 is deactivated and fades out.
+constexpr bool can_draw_veldin_final_barrier(std::uint8_t state, std::uint32_t pvars) {
+    return state == 1 && pvars != 0;
+}
+
+constexpr std::uint32_t veldin_final_barrier_draw_code_address(bool pal) {
+    return pal ? 0x002F33D8u : 0x002F1FD8u;
+}
+
+template <typename Enqueue>
+void enqueue_veldin_final_barrier(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(veldin_final_barrier_draw_code_address(pal), moby);
+}
+
 // Quartu's electric-water moby (655) both draws lightning and damages the
 // hero. Route it through a draw-only hook while Quick Select is held, never
 // through the regular scenery allowlist above. Other levels stay untouched.
