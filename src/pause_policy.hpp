@@ -702,6 +702,20 @@ void with_stopped_frame_time(ReadTime read_time, WriteTime write_time, Update up
     write_time(saved);
 }
 
+// Blackwater's class-831 water surface registers its draw callback during
+// its full update. Keep that registration while Quick Select is open, but
+// suppress time-based flood progression for the duration of the update.
+template <typename ReadTime, typename WriteTime, typename Update>
+void dispatch_blackwater_flood_update(bool wheel_active, bool keep_scenery,
+                                     int level, ReadTime read_time,
+                                     WriteTime write_time, Update update) {
+    if (wheel_active && keep_scenery && level == 5) {
+        with_stopped_frame_time(read_time, write_time, update);
+    } else {
+        update();
+    }
+}
+
 // Restore both clocks even on errors. The zeroes are scoped to exactly one
 // target update, leaving other game subsystems' timing unaffected.
 template <typename ReadTime, typename WriteTime, typename ReadSquared,

@@ -30,6 +30,29 @@ int main() {
     assert(needs_update_for_water(5, 879));
     assert(!needs_update_for_water(4, 879));
     assert(!needs_update_for_water(6, 879));
+    // Class 831 must still register its water draw, but a Quick Select
+    // refresh must not move Blackwater's flood height forward.
+    float blackwater_delta = 1.0f;
+    float blackwater_water_height = 50.0f;
+    int blackwater_draws = 0;
+    auto water_update = [&] {
+        blackwater_water_height += blackwater_delta;
+        ++blackwater_draws;
+    };
+    dispatch_blackwater_flood_update(true, true, 5,
+        [&] { return blackwater_delta; },
+        [&](float v) { blackwater_delta = v; }, water_update);
+    assert(blackwater_water_height == 50.0f);
+    assert(blackwater_delta == 1.0f);
+    assert(blackwater_draws == 1);
+    dispatch_blackwater_flood_update(false, true, 5,
+        [&] { return blackwater_delta; },
+        [&](float v) { blackwater_delta = v; }, water_update);
+    assert(blackwater_water_height == 51.0f && blackwater_draws == 2);
+    dispatch_blackwater_flood_update(true, true, 4,
+        [&] { return blackwater_delta; },
+        [&](float v) { blackwater_delta = v; }, water_update);
+    assert(blackwater_water_height == 52.0f && blackwater_draws == 3);
     // Nebula G34: the dual-texture quad controller must enqueue its glass draw.
     assert(needs_update_for_water(6, 1062));
     assert(!needs_update_for_water(5, 1062));
