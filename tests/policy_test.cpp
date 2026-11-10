@@ -32,6 +32,67 @@ int main() {
     assert(needs_update_for_water(5, 879));
     assert(!needs_update_for_water(4, 879));
     assert(!needs_update_for_water(6, 879));
+    // Blackwater class 831 owns both the gameplay flood and all 48 water
+    // grids. Never release that update: it may only submit the *one* existing
+    // grid draw callback while Quick Select is active in level 5.
+    assert(should_route_blackwater_water_draw(true, true, true, true, 5, 831));
+    assert(!should_route_blackwater_water_draw(false, true, true, true, 5, 831));
+    assert(!should_route_blackwater_water_draw(true, false, true, true, 5, 831));
+    assert(!should_route_blackwater_water_draw(true, true, false, true, 5, 831));
+    assert(!should_route_blackwater_water_draw(true, true, true, false, 5, 831));
+    assert(!should_route_blackwater_water_draw(true, true, true, true, 6, 831));
+    assert(!should_route_blackwater_water_draw(true, true, true, true, 5, 879));
+    assert(can_draw_blackwater_water_grid(1, 0x1000u, 0));
+    assert(can_draw_blackwater_water_grid(8, 0x1000u, 0));
+    assert(!can_draw_blackwater_water_grid(0, 0x1000u, 0));
+    assert(!can_draw_blackwater_water_grid(1, 0u, 0));
+    assert(!can_draw_blackwater_water_grid(1, 0x1000u, -1));
+    assert(!can_draw_blackwater_water_grid(1, 0x1000u, 1));
+    assert(!can_draw_blackwater_water_grid(1, 0x1000u, 47));
+    assert(blackwater_water_draw_code_address(false) == 0x0030D678u);
+    assert(blackwater_water_draw_code_address(true) == 0x0030EB40u);
+    std::uint32_t blackwater_draw_code = 0;
+    std::uint32_t blackwater_draw_moby = 0;
+    int blackwater_original_calls = 0;
+    int blackwater_draw_calls = 0;
+    BlackwaterWaterDrawFrameLimiter water_draw_limiter;
+    for (int record_index = 0; record_index < 41; ++record_index) {
+        const bool primary = can_draw_blackwater_water_grid(1, 0x1000u, record_index);
+        const bool first_this_frame = water_draw_limiter.claim(true, primary);
+        dispatch_blackwater_water_update(true, first_this_frame,
+            [&] { ++blackwater_original_calls; },
+            [&] {
+                ++blackwater_draw_calls;
+                enqueue_blackwater_water_grid(false, 0xCAFEu,
+                    [&](std::uint32_t code, std::uint32_t moby) {
+                        blackwater_draw_code = code;
+                        blackwater_draw_moby = moby;
+                    });
+            });
+    }
+    // 41 class-831 controller invocations must submit just one renderer,
+    // and must never execute any of the flood/ripple logic.
+    assert(blackwater_original_calls == 0 && blackwater_draw_calls == 1);
+    assert(blackwater_draw_code == 0x0030D678u && blackwater_draw_moby == 0xCAFEu);
+    assert(!water_draw_limiter.claim(true, true)); // Even duplicate primaries cannot enqueue twice.
+    water_draw_limiter.reset();
+    assert(!water_draw_limiter.claim(true, false));
+    assert(!water_draw_limiter.claim(false, true));
+    assert(water_draw_limiter.claim(true, true));
+    dispatch_blackwater_water_update(false, true,
+        [&] { ++blackwater_original_calls; },
+        [&] { ++blackwater_draw_calls; });
+    assert(blackwater_original_calls == 1 && blackwater_draw_calls == 1);
+    dispatch_blackwater_water_update(true, false,
+        [&] { ++blackwater_original_calls; },
+        [&] { ++blackwater_draw_calls; });
+    assert(blackwater_original_calls == 1 && blackwater_draw_calls == 1);
+    enqueue_blackwater_water_grid(true, 0xBEEFu,
+        [&](std::uint32_t code, std::uint32_t moby) {
+            blackwater_draw_code = code;
+            blackwater_draw_moby = moby;
+        });
+    assert(blackwater_draw_code == 0x0030EB40u && blackwater_draw_moby == 0xBEEFu);
     // Nebula G34: the dual-texture quad controller must enqueue its glass draw.
     assert(needs_update_for_water(6, 1062));
     assert(!needs_update_for_water(5, 1062));

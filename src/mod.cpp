@@ -24,6 +24,7 @@ constexpr openrac::gaddr kMobySpawnFrame = 0x38u;
 constexpr openrac::gaddr kMobyClass = 0xA6u;
 constexpr openrac::gaddr kMobyState = 0x20u;
 constexpr openrac::gaddr kMobyPvars = 0x78u;
+constexpr openrac::gaddr kBlackwaterWaterRecordIndex = 0x14u;
 constexpr openrac::gaddr kQuartuElectricLightSlot = 0x120u;
 constexpr openrac::gaddr kVendorRingPtr = 0x0Cu;
 constexpr openrac::gaddr kVendorGlowStrength = 0x90u;
@@ -66,6 +67,10 @@ bool wheel_active = false;
 std::atomic<bool> wheel_visible_for_overlay{false};
 bool wheel_seen_this_tick = false;
 bool world_gate = false;
+bool blackwater_water_draw_hook = false;
+bool blackwater_water_first_draw_logged = false;
+bool blackwater_water_missing_draw_warned = false;
+pause_policy::BlackwaterWaterDrawFrameLimiter blackwater_water_draw_limiter;
 bool quartu_electric_draw_hook = false;
 bool quartu_electric_first_draw_logged = false;
 bool quartu_electric_missing_draw_warned = false;
@@ -123,6 +128,7 @@ int observed_level = -1;
 std::set<int> observed_classes;
 std::set<int> exempted_classes;
 int vendor_visual_draw_count = 0;
+int blackwater_water_draw_count = 0;
 int vendor_original_refresh_count = 0;
 int nanotech_attached_glow_count = 0;
 int nanotech_detached_glow_count = 0;
@@ -163,6 +169,8 @@ void report_pause_diagnostics() {
         log_class_list("exempted", exempted_classes);
         game_mod->info("pause diagnostic visual updates: vendor_draw="
                        + std::to_string(vendor_visual_draw_count)
+                       + ", blackwater_water_draw="
+                       + std::to_string(blackwater_water_draw_count)
                        + ", vendor_original_refresh="
                        + std::to_string(vendor_original_refresh_count)
                        + ", nanotech_halo=" + std::to_string(nanotech_attached_glow_count)
@@ -203,6 +211,7 @@ void report_pause_diagnostics() {
     observed_classes.clear();
     exempted_classes.clear();
     vendor_visual_draw_count = 0;
+    blackwater_water_draw_count = 0;
     vendor_original_refresh_count = 0;
     nanotech_attached_glow_count = 0;
     nanotech_detached_glow_count = 0;
@@ -333,6 +342,8 @@ int gate_moby_update(void*, int slot, int phase) {
         wheel_active, keep_water, world_gate, paired_target_effect_hook, oclass, state);
     const bool vendor_draw_only = pause_policy::should_route_vendor_draw(
         wheel_active, keep_water, world_gate, vendor_draw_hook, oclass);
+    const bool blackwater_water_draw_only = pause_policy::should_route_blackwater_water_draw(
+        wheel_active, keep_water, world_gate, blackwater_water_draw_hook, level, oclass);
     const bool kalebo_wall_ribbons = pause_policy::should_route_kalebo_wall_ribbons(
         wheel_active, keep_water, world_gate, kalebo_wall_ribbon_hook,
         level, oclass, state, flags);
@@ -349,7 +360,7 @@ int gate_moby_update(void*, int slot, int phase) {
     const bool veldin_final_lift_draw_only = pause_policy::should_route_veldin_final_lift_draw(
         wheel_active, keep_water, world_gate, veldin_final_lift_draw_hook, level, oclass);
     if (keep_water && (pause_policy::needs_update_for_water(level, oclass)
-                       || vendor_draw_only
+                       || vendor_draw_only || blackwater_water_draw_only
                        || nanotech_draw_only || paired_target_effects
                        || kalebo_wall_ribbons || fleet_laser_draw_only
                        || fleet_backdrop_draw_only || veldin_orbit_doorway_draw_only
@@ -457,6 +468,11 @@ void load(openrac::Mod& mod) {
     legacy_first_draw_logged = false;
     wheel_seen_this_tick = false;
     world_gate = false;
+    blackwater_water_draw_hook = false;
+    blackwater_water_first_draw_logged = false;
+    blackwater_water_missing_draw_warned = false;
+    blackwater_water_draw_limiter.reset();
+    blackwater_water_draw_count = 0;
     quartu_electric_draw_hook = false;
     quartu_electric_first_draw_logged = false;
     quartu_electric_missing_draw_warned = false;
@@ -525,6 +541,62 @@ void load(openrac::Mod& mod) {
             original();
         }
     });
+
+    // Blackwater class 831 owns the moving flood as well as all 48 water
+    // grids. Its ordinary update would continue the flooding room's timer,
+    // and pool_flush advances ripple buffers. While Quick Select is open,
+    // enqueue just the already-prepared water-grid renderer from record 0.
+    // Do not run original(), pool_flush(), or enqueue once per water record.
+    try {
+        mod.hook<openrac::rac1::Moby_Water_Update>([](auto original, std::uint32_t moby) {
+            const bool draw_only = pause_policy::should_route_blackwater_water_draw(
+                wheel_active, keep_water, world_gate,
+                blackwater_water_draw_hook, game_mod->loaded_level(), 831);
+            bool enqueue_draw = false;
+            GameAddDrawCallbackFn add_callback = nullptr;
+            const bool pal = game_mod->version() == "pal";
+            if (draw_only && moby != 0) {
+                const auto memory = game_mod->memory();
+                const auto state = memory.read<std::uint8_t>(moby + kMobyState);
+                const auto pvars = memory.read<std::uint32_t>(moby + kMobyPvars);
+                if (state != 0 && pvars != 0) {
+                    const auto record_index = memory.read<std::int32_t>(
+                        pvars + kBlackwaterWaterRecordIndex);
+                    if (pause_policy::can_draw_blackwater_water_grid(state, pvars, record_index)
+                        && !blackwater_water_draw_limiter.queued_this_frame) {
+                        add_callback = game_mod->function_at<GameAddDrawCallbackFn>(
+                            pal ? kPalAddDrawCallback : kNtscAddDrawCallback);
+                        const auto draw = game_mod->function_at<GameDrawEffectFn>(
+                            pause_policy::blackwater_water_draw_code_address(pal));
+                        if (add_callback == nullptr || draw == nullptr) {
+                            if (!blackwater_water_missing_draw_warned) {
+                                game_mod->warn("Blackwater water-grid renderer unavailable; flood remains paused");
+                                blackwater_water_missing_draw_warned = true;
+                            }
+                        } else {
+                            enqueue_draw = blackwater_water_draw_limiter.claim(true, true);
+                        }
+                    }
+                }
+            }
+
+            pause_policy::dispatch_blackwater_water_update(
+                draw_only, enqueue_draw,
+                [&] { original(moby); },
+                [&] {
+                    pause_policy::enqueue_blackwater_water_grid(pal, moby, add_callback);
+                    ++blackwater_water_draw_count;
+                    if (!blackwater_water_first_draw_logged) {
+                        game_mod->info("Blackwater water grids drawn from preserved state while flood logic stays paused");
+                        blackwater_water_first_draw_logged = true;
+                    }
+                });
+        });
+        blackwater_water_draw_hook = true;
+        mod.info("Blackwater water-grid draw-only hook registered (class 831)");
+    } catch (const openrac::Error&) {
+        mod.warn("Blackwater water-grid draw hook unavailable; flood stays paused and surface may be hidden");
+    }
 
     // Class 1901 draws Hoven's scrolling layered surface. Skipping its update
     // removes the surface, but running it normally advances the UV phases.
@@ -1341,6 +1413,9 @@ void load(openrac::Mod& mod) {
     }
 
     mod.on_frame([] {
+        // The water renderer is queued by the primary controller, not once
+        // for each of the 41+ visible class-831 mobys this level may contain.
+        blackwater_water_draw_limiter.reset();
         if (!wheel_seen_this_tick) {
             wheel_active = false;
             wheel_visible_for_overlay.store(false, std::memory_order_relaxed);

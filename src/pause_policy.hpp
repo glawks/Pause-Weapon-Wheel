@@ -66,6 +66,63 @@ constexpr bool needs_update_for_water(int level, int oclass) {
     }
 }
 
+// Blackwater (level 5) class 831 maintains all the rising-water grids AND
+// drives the flood timer/state machine. Only its primary record normally
+// submits a single callback to draw the entire collection of water grids.
+// The normal update must stay frozen while Quick Select is open.
+constexpr bool should_route_blackwater_water_draw(bool wheel_active,
+                                                  bool keep_scenery, bool world_gate,
+                                                  bool draw_hook_installed,
+                                                  int level, int oclass) {
+    return wheel_active && keep_scenery && world_gate && draw_hook_installed
+           && level == 5 && oclass == 831;
+}
+
+// WaterVars::record_index is a signed int at pvars+0x14 in the RAC1
+// decompilation. Only record 0 enqueues render_level_water_grids; other
+// records update their own grid heights but do not submit draw callbacks.
+constexpr bool can_draw_blackwater_water_grid(std::uint8_t state,
+                                              std::uint32_t pvars,
+                                              std::int32_t record_index) {
+    return state != 0 && pvars != 0 && record_index == 0;
+}
+
+// Guest addresses of level-05 render_level_water_grids. It is a standalone
+// renderer consuming the LAST prepared frame's water grids, with no flood
+// progression or ripple-step update needed before the callback is enqueued.
+constexpr std::uint32_t blackwater_water_draw_code_address(bool pal) {
+    return pal ? 0x0030EB40u : 0x0030D678u;
+}
+
+template <typename Enqueue>
+void enqueue_blackwater_water_grid(bool pal, std::uint32_t moby, Enqueue enqueue) {
+    enqueue(blackwater_water_draw_code_address(pal), moby);
+}
+
+struct BlackwaterWaterDrawFrameLimiter {
+    bool queued_this_frame = false;
+
+    bool claim(bool draw_only, bool primary_grid_ready) {
+        if (!draw_only || !primary_grid_ready || queued_this_frame) {
+            return false;
+        }
+        queued_this_frame = true;
+        return true;
+    }
+
+    void reset() { queued_this_frame = false; }
+};
+
+template <typename Original, typename Draw>
+void dispatch_blackwater_water_update(bool draw_only, bool enqueue_draw,
+                                     Original original, Draw draw) {
+    if (!draw_only) {
+        original();
+    } else if (enqueue_draw) {
+        draw();
+    }
+}
+
 // Veldin Orbit's yellow doorway spark field (class 78) and exterior air-flow
 // veil (class 1378) both register textured-quad callbacks on each update.
 // Their normal updates also spawn particles, manage linked mobys, or modify
