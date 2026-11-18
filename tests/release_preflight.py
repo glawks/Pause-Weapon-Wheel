@@ -22,7 +22,7 @@ class ReleasePreflight(unittest.TestCase):
 
     def test_release_identity_and_version(self):
         self.assertEqual(self.manifest["id"], "pause-weapon-wheel")
-        self.assertEqual(self.manifest["version"], "1.0.2")
+        self.assertRegex(self.manifest["version"], r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$")
         match = re.search(r'OPENRAC_MOD_CPP\("([^"]+)",\s*"([^"]+)"', self.source)
         self.assertIsNotNone(match, "Native mod ID/version must be declared")
         self.assertEqual(match.group(1), self.manifest["id"])

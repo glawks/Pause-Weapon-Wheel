@@ -1,0 +1,7 @@
+.sdk/
+.openrac/
+build/
+build-*/
+dist/
+__pycache__/
+*.pyc

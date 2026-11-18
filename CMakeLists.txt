@@ -1,10 +1,37 @@
 cmake_minimum_required(VERSION 3.20)
-project(weapon_wheel_pause LANGUAGES C CXX)
+project(weapon_wheel_pause VERSION 1.0.3 LANGUAGES C CXX)
 
+include(CTest)
+
+# Supply the SDK explicitly, or fetch the pinned archive in sdk.lock.
 if(NOT OpenRACMod_DIR)
   if(DEFINED OPENRAC_SDK)
     set(OpenRACMod_DIR "${OPENRAC_SDK}/cmake")
+  else()
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/sdk.lock" lock)
+    string(JSON sdk_version GET "${lock}" version)
+    set(OpenRACMod_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.sdk/openrac-mod-sdk-${sdk_version}/cmake")
+    if(NOT EXISTS "${OpenRACMod_DIR}/OpenRACModConfig.cmake")
+      message(FATAL_ERROR "OpenRAC SDK not found. Run: python tools/fetch_sdk.py")
+    endif()
   endif()
 endif()
+
 find_package(OpenRACMod 1.14 REQUIRED)
 openrac_add_mod(weapon_wheel_pause MANIFEST openrac-mod.json SOURCES src/mod.cpp)
+set_target_properties(weapon_wheel_pause PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+if(BUILD_TESTING)
+  foreach(test_name policy legacy_shade veil)
+    add_executable(pause_${test_name}_test tests/${test_name}_test.cpp)
+    target_include_directories(pause_${test_name}_test PRIVATE src)
+    set_target_properties(pause_${test_name}_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    # Tests use assert(); Release optimizations must not turn assertions off.
+    if(MSVC)
+      target_compile_options(pause_${test_name}_test PRIVATE /UNDEBUG)
+    else()
+      target_compile_options(pause_${test_name}_test PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME pause_${test_name} COMMAND pause_${test_name}_test)
+  endforeach()
+endif()
