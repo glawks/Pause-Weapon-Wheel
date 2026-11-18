@@ -1,0 +1,5 @@
+# Keep packaged files byte-identical across Windows, Linux and macOS.
+* text=auto eol=lf
+*.zip binary
+*.png binary
+*.glb binary
