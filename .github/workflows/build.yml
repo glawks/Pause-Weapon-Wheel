@@ -10,7 +10,25 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: Verify manifest and SDK hooks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Fetch checksum-pinned OpenRAC SDK
+        run: python tools/fetch_sdk.py
+      - name: Validate native version and declared hooks
+        run: |
+          SDK=$(python tools/fetch_sdk.py)
+          python tests/release_preflight.py --sdk-header "$SDK/include/openrac/games/rac1.hpp"
+
   build:
+    needs: preflight
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     strategy:

@@ -21,7 +21,7 @@ Install **Weapon Wheel Pause** using OpenRAC's **Mods** tab.
 
 Alternatively, download the appropriate mod ZIP from the [GitHub Releases page](https://github.com/glawks/Pause-Weapon-Wheel/releases) and install it through OpenRAC's Mods tab.
 
-The mod supports **Ratchet & Clank 1 (PAL and NTSC-U)** and requires OpenRAC mod API **1.12 or newer**.
+The mod supports **Ratchet & Clank 1 (PAL and NTSC-U)** on **Windows x86_64, Linux x86_64/aarch64, macOS arm64/x86_64, and Android ARM64**. It requires OpenRAC mod API **1.12 or newer**.
 
 ## Settings
 
@@ -42,19 +42,28 @@ Restart the game after changing settings.
 - Some decorative particles, rain, flowing textures and other ambient effects may continue animating even while gameplay is frozen.
 - Other mods that control OpenRAC's world-object update gate may conflict. If another mod owns that gate, Ratchet may freeze without the rest of the world freezing.
 - The optional background effect is a **tint**, not a blur.
-- PAL and macOS/Linux gameplay have not yet been verified as extensively as NTSC-U on Windows.
-- The [`testing` branch](https://github.com/glawks/Pause-Weapon-Wheel/tree/testing) may contain fixes that have not yet been included in the latest public release.
+- Most level-specific scenery fixes were tested on NTSC-U for Windows; PAL and macOS gameplay have not been tested to the same extent.
+- The Linux build has been tested in-game on ChimeraOS by community contributor [Promises](https://github.com/Promises), including all 16 hooks. Android ARM64 has also been tested successfully in-game.
+- The launcher needs the archive matching your platform, not an archive for a different operating system.
 
 ## Building from source
 
-This repository contains the mod source code. Windows x64 builds are produced by [GitHub Actions](https://github.com/glawks/Pause-Weapon-Wheel/actions), or you can build locally using CMake, Ninja and the [OpenRAC mod SDK](https://github.com/OpenRAC/OpenRAC/tree/sdk-v1.14.2/sdk):
+[GitHub Actions](https://github.com/glawks/Pause-Weapon-Wheel/actions) builds and packages all six supported platforms using the checksum-pinned [OpenRAC mod SDK v1.14.6](https://github.com/OpenRAC/OpenRAC/releases/tag/sdk-v1.14.6). Each versioned GitHub Release includes individual platform ZIPs, a combined ZIP, and `SHA256SUMS`.
 
-```powershell
-cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DOpenRACMod_DIR="C:/path/to/OpenRAC/sdk/cmake"
-cmake --build build-win --parallel
+To build locally, install Python 3, CMake, Ninja, and a compatible C++ compiler, then run:
+
+```sh
+python tools/fetch_sdk.py
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-If you use a GitHub Actions build, extract the workflow artifact first and install the **mod ZIP inside it**, not the outer artifact ZIP.
+The build uses the OpenRAC SDK from `sdk.lock`. Cross-compiling for Android requires the Android NDK with `ANDROID_ABI=arm64-v8a` and `ANDROID_PLATFORM=android-28`; CI performs that build automatically.
+
+For a workflow artifact, extract the outer GitHub Actions artifact first, then install the **platform-specific mod ZIP inside it** in OpenRAC's Mods tab.
+
+Thanks to [Promises](https://github.com/Promises) for testing the Linux build in ChimeraOS and contributing Linux packaging feedback via [PR #1](https://github.com/glawks/Pause-Weapon-Wheel/pull/1).
 
 ## License
 
